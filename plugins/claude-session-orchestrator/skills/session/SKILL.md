@@ -115,6 +115,8 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 - `cleanup` — [reference/commands-cleanup.md](reference/commands-cleanup.md)
 - `orchestrate` — [reference/commands-orchestrate.md](reference/commands-orchestrate.md)
 - build protocol (teams, testing, sub-agents) — [reference/build-protocol.md](reference/build-protocol.md)
+- psmux command + keyboard reference — [reference/psmux-cheatsheet.md](reference/psmux-cheatsheet.md)
+- the full start/middle/end parallel workflow — [reference/psmux-workflow.md](reference/psmux-workflow.md)
 
 ---
 
