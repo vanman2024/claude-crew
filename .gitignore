@@ -1,0 +1,12 @@
+# OS / editor
+Thumbs.db
+.DS_Store
+*.swp
+
+# Local-only plugin settings (per the .local.md convention)
+.claude/*.local.md
+.claude/settings.local.json
+
+# Pester / test output
+testResults*.xml
+coverage*.xml

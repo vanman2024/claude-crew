@@ -1,0 +1,16 @@
+{
+  "projectName": "StaffHive",
+  "repoPath": "C:\\Users\\angel\\Projects\\staffhive",
+  "worktreesPath": "C:\\Users\\angel\\Projects\\staffhive-worktrees",
+  "psmuxSession": "staffhive",
+  "githubRepo": "vanman2024/staffhive",
+  "defaultBranch": "master",
+  "claudeCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
+  "devServer": { "port": 3000, "dir": "." },
+  "layout": {
+    "type": "root",
+    "envFiles": [".env", ".env.local", ".env.test"],
+    "nodeModules": "node_modules",
+    "testCmd": "npx tsc --noEmit && pnpm test"
+  }
+}

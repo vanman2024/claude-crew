@@ -1,0 +1,56 @@
+{
+  "projectName": "RedAI",
+  "repoPath": "C:\\Users\\angel\\Projects\\RedAI",
+  "worktreesPath": "C:\\Users\\angel\\Projects\\RedAI-worktrees",
+  "psmuxSession": "redai",
+  "githubRepo": "vanman2024/RedAI",
+  "defaultBranch": "master",
+  "claudeCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
+  "devServer": { "port": 3000, "dir": "frontend" },
+  "layout": {
+    "type": "monorepo-split",
+    "parts": [
+      {
+        "name": "frontend",
+        "path": "frontend",
+        "envFiles": [".env.local", ".env.test"],
+        "nodeModules": "frontend/node_modules",
+        "testCmd": "cd frontend && npx tsc --noEmit && pnpm test"
+      },
+      {
+        "name": "backend",
+        "path": "backend",
+        "envFiles": [".env"],
+        "pythonVenv": ".venv",
+        "testCmd": "& '<repo>\\backend\\.venv\\Scripts\\python.exe' -m pytest"
+      }
+    ]
+  },
+  "teams": {
+    "frontend": {
+      "ownsPaths": ["frontend/components/**", "frontend/app/**", "frontend/lib/**", "frontend/hooks/**"],
+      "agents": [
+        "nextjs-frontend:component-builder-agent",
+        "nextjs-frontend:page-generator-agent",
+        "nextjs-frontend:api-route-generator-agent",
+        "nextjs-frontend:design-enforcer-agent",
+        "nextjs-frontend:supabase-integration-agent"
+      ],
+      "skills": [
+        "frontend-design",
+        "build-page",
+        "nextjs-frontend:design-system-enforcement"
+      ]
+    },
+    "backend": {
+      "ownsPaths": ["backend/api/routes/**", "backend/services/**", "backend/models/**"],
+      "agents": [
+        "fastapi-backend:endpoint-generator-agent",
+        "fastapi-backend:database-architect-agent"
+      ]
+    },
+    "testing": {
+      "agents": ["frontend-test-generator", "code-validator"]
+    }
+  }
+}
