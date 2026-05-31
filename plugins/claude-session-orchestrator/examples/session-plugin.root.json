@@ -6,6 +6,7 @@
   "githubRepo": "vanman2024/staffhive",
   "defaultBranch": "master",
   "workerCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
+  "workerCli": "claude",
   "devServer": { "port": 3000, "dir": "." },
   "layout": {
     "type": "root",

@@ -170,3 +170,95 @@ function ConvertTo-SessionSlug {
     return $s
 }
 
+# --- Worker-CLI profiles ------------------------------------------------------
+# The worker dispatch is data-driven: a profile tells psmux-dispatch how to launch
+# the agent CLI in the pane and how to detect that it is ready.
+#
+#   name           : label
+#   cmd            : launch command (falls back to config.workerCmdPath)
+#   args           : launch args (string[])
+#   clearEnv       : env vars to null in the pane before launch (string[])
+#   acceptMatchAny : substrings that signal a first-run accept screen (matched
+#                    against the pane text with ALL whitespace removed)
+#   acceptSend     : key/string to send when an accept pattern matches
+#   readyMatchAny  : substrings (whitespace-removed) that signal the REPL is ready
+#   bootWaitSec    : fixed wait when there are NO accept/ready patterns
+#
+# Only 'claude' is verified (proven in the live e2e). 'generic' does a fixed-wait
+# launch with no accept handshake. For other CLIs (Codex/Gemini/Qwen), supply a
+# custom object in config.workerCli with that CLI's REAL patterns — we do not ship
+# unverified prompt strings.
+function Get-WorkerCliPreset {
+    param([string]$Name)
+    switch ($Name) {
+        'claude' {
+            [pscustomobject]@{
+                name = 'claude'; cmd = $null
+                args = @('--dangerously-skip-permissions')
+                clearEnv = @('CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT')
+                acceptMatchAny = @('Yes,Iaccept', 'No,exit'); acceptSend = '2'
+                readyMatchAny = @('bypasspermissionson'); bootWaitSec = 12
+            }
+        }
+        'generic' {
+            [pscustomobject]@{
+                name = 'generic'; cmd = $null
+                args = @(); clearEnv = @()
+                acceptMatchAny = @(); acceptSend = ''
+                readyMatchAny = @(); bootWaitSec = 10
+            }
+        }
+        default { $null }
+    }
+}
+
+# Resolve the effective worker-CLI profile from config.workerCli, which may be:
+#   - absent          -> 'claude' preset
+#   - a string        -> that preset name
+#   - an object       -> { preset?, cmd?, args?, clearEnv?, bootWaitSec?,
+#                          accept{matchAny?,send?}, ready{matchAny?} } extending a preset
+# cmd falls back to config.workerCmdPath.
+function Get-WorkerCliProfile {
+    param([Parameter(Mandatory)]$Config)
+
+    $wc = $null
+    if ($Config.PSObject.Properties.Name -contains 'workerCli') { $wc = $Config.workerCli }
+
+    $presetName = 'claude'
+    $override = $null
+    if ($null -eq $wc) {
+        $presetName = 'claude'
+    } elseif ($wc -is [string]) {
+        $presetName = $wc
+    } else {
+        if (($wc.PSObject.Properties.Name -contains 'preset') -and $wc.preset) { $presetName = $wc.preset }
+        $override = $wc
+    }
+
+    $profile = Get-WorkerCliPreset $presetName
+    if ($null -eq $profile) {
+        throw "Unknown workerCli preset '$presetName' (known: claude, generic). For another CLI, use a workerCli OBJECT with explicit fields (cmd/args/clearEnv/accept/ready/bootWaitSec)."
+    }
+
+    if ($override) {
+        if (($override.PSObject.Properties.Name -contains 'cmd') -and $override.cmd) { $profile.cmd = $override.cmd }
+        if ($override.PSObject.Properties.Name -contains 'args') { $profile.args = @($override.args) }
+        if ($override.PSObject.Properties.Name -contains 'clearEnv') { $profile.clearEnv = @($override.clearEnv) }
+        if (($override.PSObject.Properties.Name -contains 'bootWaitSec') -and $override.bootWaitSec) { $profile.bootWaitSec = [int]$override.bootWaitSec }
+        if ($override.PSObject.Properties.Name -contains 'accept') {
+            $acc = $override.accept
+            if ($acc -and ($acc.PSObject.Properties.Name -contains 'matchAny')) { $profile.acceptMatchAny = @($acc.matchAny) }
+            if ($acc -and ($acc.PSObject.Properties.Name -contains 'send'))     { $profile.acceptSend = $acc.send }
+        }
+        if ($override.PSObject.Properties.Name -contains 'ready') {
+            $rdy = $override.ready
+            if ($rdy -and ($rdy.PSObject.Properties.Name -contains 'matchAny')) { $profile.readyMatchAny = @($rdy.matchAny) }
+        }
+    }
+
+    if (-not $profile.cmd) { $profile.cmd = $Config.workerCmdPath }
+    if (-not $profile.cmd) { throw "workerCli profile has no command: set config.workerCmdPath or workerCli.cmd" }
+
+    return $profile
+}
+

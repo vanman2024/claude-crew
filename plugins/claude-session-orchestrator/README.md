@@ -115,19 +115,64 @@ This plugin **is a Claude Code plugin** — the skills, the `/session` command, 
 orchestrator, and your conversational session all run *in Claude Code*. That part
 is inherently Claude.
 
-The **workers**, though, are CLI-agnostic. `workerCmdPath` is just the command the
+The **workers**, though, are CLI-agnostic. `workerCmdPath` is the command the
 dispatch scripts launch in each psmux pane — the worktree + psmux + brief +
-orchestrator scaffold doesn't care what runs there. Today it defaults to Claude
-(`claude.cmd`), but the launch step is a single indirection point that could point
-at another agent CLI.
+orchestrator scaffold doesn't care what runs there. It defaults to Claude
+(`claude.cmd`).
 
-**Honest caveat:** the launch is currently *tuned to Claude* — the boot handshake
-auto-handles Claude's bypass-permissions accept screen and waits for its "bypass
-permissions on" footer, the `--dangerously-skip-permissions` flag is Claude's, and
-the pane clears `CLAUDECODE`. Pointing `workerCmdPath` at a different CLI would work
-for the worktree/psmux mechanics but would need the handshake generalized per CLI
-(a planned enhancement). So: **scaffold is agent-agnostic; the launch is Claude-tuned
-today.**
+#### `workerCli` — how the worker launch + boot handshake are driven
+
+The launch and the boot handshake are **data-driven** by an optional `workerCli`
+profile, so you can run a non-Claude worker without editing any script. It can be:
+
+- **omitted** → the `claude` preset (today's behavior), or
+- **a preset name string** → `"claude"` or `"generic"`, or
+- **an object** that extends a preset / fully specifies the launch:
+
+| Field | Meaning |
+|-------|---------|
+| `preset` | base preset to extend (`claude` / `generic`) |
+| `cmd` | launch command (defaults to `workerCmdPath`) |
+| `args` | launch args, e.g. `["--dangerously-skip-permissions"]` |
+| `clearEnv` | env vars to null in the pane before launch, e.g. `["CLAUDECODE"]` |
+| `accept` | `{ "matchAny": [...], "send": "2" }` — first-run accept screen + key to send |
+| `ready` | `{ "matchAny": [...] }` — strings that mean the REPL is ready |
+| `bootWaitSec` | fixed wait used **only** when there are no accept/ready patterns |
+
+> **Pattern matching:** `accept.matchAny` / `ready.matchAny` are matched against the
+> pane text **with all whitespace removed** (so write `"bypasspermissionson"`, not
+> `"bypass permissions on"`). This makes matching robust to wrapping/spacing.
+
+**Shipped presets:**
+- **`claude`** (default, verified) — `args: --dangerously-skip-permissions`, clears
+  `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT`, accepts the bypass screen with `2`, waits for
+  the `bypass permissions on` footer.
+- **`generic`** — no args, no env clearing, **no accept handshake**; just a fixed
+  `bootWaitSec` wait then sends the brief. Good for a CLI that boots straight to a
+  prompt.
+
+**Other CLIs (Codex / Gemini / Qwen / …):** we deliberately do **not** ship presets
+with guessed prompt strings for CLIs we can't verify. Wire your CLI with an object,
+supplying its *real* startup patterns. Example shape (verify the actual strings for
+your CLI — these are placeholders):
+
+```jsonc
+"workerCmdPath": "C:\\path\\to\\your-cli.cmd",
+"workerCli": {
+  "preset": "generic",
+  "args": ["--auto-approve"],            // your CLI's "skip approvals" flag
+  "clearEnv": [],                         // any env vars that confuse a nested launch
+  "accept": { "matchAny": ["trustthisfolder?"], "send": "y" },  // first-run gate, if any
+  "ready":  { "matchAny": ["readyprompttoken"] },               // how you know it's up
+  "bootWaitSec": 12
+}
+```
+
+**Honest status:** the **`claude` preset is the only verified one** (it's what the
+live e2e proved). The scaffold (worktree + psmux + brief + orchestrator pane I/O) is
+fully agent-agnostic; getting a *new* CLI to boot cleanly is just a matter of getting
+its `accept`/`ready` patterns right in `workerCli`. The orchestrator and the headless
+`dispatch-worktree.ps1` remain Claude (they run the Claude-only skill / `claude -p`).
 
 ### Layout: `root`
 

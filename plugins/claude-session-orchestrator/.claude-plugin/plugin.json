@@ -1,6 +1,6 @@
 {
   "name": "claude-session-orchestrator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Project-agnostic parallel-worktree build pipeline for Windows. Spawns Claude workers in psmux windows across git worktrees, orchestrates them via Claude Code's native /loop with a no-auto-merge contract, and tears them down junction-first. Driven entirely by a per-project .claude/session-plugin.json config.",
   "author": {
     "name": "vanman2024",
