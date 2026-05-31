@@ -94,10 +94,12 @@ Rule of thumb: the X button is for the OS terminal app, not for psmux content.
 
 ---
 
-## Launching Claude in a psmux pane
+## Launching the worker CLI in a psmux pane
 
-The plugin's `dispatch/psmux-dispatch.ps1` does this for you with the full boot
-handshake. The raw commands, for reference:
+The plugin's `dispatch/psmux-dispatch.ps1` does this for you, driven by the
+`workerCli` profile (the launch command, args, env-clearing, and accept/ready
+handshake — see the README's "Worker CLI" section). The examples below are the
+**default `claude` profile**; a non-Claude worker swaps these via `workerCli`.
 
 **Worker Claude** (in a worktree, will open a PR for review):
 ```powershell

@@ -133,10 +133,16 @@ Confirm the project's entry files / package manifests exist. If ANY check fails,
 `psmux-dispatch.ps1` does the whole interactive dispatch in one call: creates the worktree
 off `origin/<base>` (or reuses a healthy one), copies env files (from `config.layout`),
 junctions node_modules from the main checkout (no install), writes `.claude-bootstrap.md`,
-ensures the `<sess>` psmux session, adds a window for the worktree, launches
-`claude.cmd --dangerously-skip-permissions`, runs the **boot handshake** (polls
-`capture-pane`, auto-picks "2" on the accept screen, waits for the "bypass permissions on"
-footer), then sends the bootstrap message. You do NOT need the old per-step WT flow.
+ensures the `<sess>` psmux session, adds a window for the worktree, launches the
+**worker CLI** and runs its **boot handshake**, then sends the bootstrap message.
+You do NOT need the old per-step WT flow.
+
+The launch + handshake are driven by the resolved `workerCli` profile (see the
+plugin README's "Worker CLI" section), so this step is CLI-agnostic. The default
+`claude` profile launches `claude.cmd --dangerously-skip-permissions`, clears
+`CLAUDECODE`, auto-picks "2" on the accept screen, and waits for the "bypass
+permissions on" footer; a custom profile supplies its own args / env-clearing /
+accept+ready patterns.
 
 **Decide the task, then dispatch.** Prefer the `-Task "<desc>"` form — the script generates
 the full brief AND auto-injects the project's agent-team / file-lane rules (from

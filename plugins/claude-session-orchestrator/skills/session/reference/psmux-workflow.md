@@ -69,9 +69,10 @@ one shot:
 4. **Write `.claude-bootstrap.md`** at the worktree root (the brief, with the
    project's agent-team rules injected — see [build-protocol.md](build-protocol.md)).
 5. **Add a psmux window**: `psmux new-window -t <sess> -n <name> -c <wt>\<name>`
-6. **Clear `CLAUDECODE`**, then launch the worker with the **boot handshake**
-   (auto-accept the bypass-permissions screen, wait for the "bypass permissions
-   on" footer), then send the brief instruction + a standalone Enter.
+6. **Launch the worker CLI** per the `workerCli` profile and run its **boot
+   handshake**, then send the brief instruction + a standalone Enter. (Default
+   `claude` profile: clear `CLAUDECODE`, auto-accept the bypass-permissions screen,
+   wait for the "bypass permissions on" footer. A custom profile defines its own.)
 
 The worker takes over from there: plan → build (with the specialized agents) →
 test → commit → push → open a PR → signal `WORKTREE_STATUS: COMPLETE`.
