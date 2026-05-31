@@ -59,7 +59,9 @@ $cfg = Get-SessionConfig -Config $Config -RepoPath $RepoPath
 $RepoRoot  = $cfg.repoPath
 $WtBase    = $cfg.worktreesPath
 $WtPath    = Join-Path $WtBase $Name
-$ClaudeCmd = $cfg.workerCmdPath
+# The worker CLI launch + boot handshake are data-driven (see Get-WorkerCliProfile).
+$WorkerCli = Get-WorkerCliProfile -Config $cfg
+$WorkerCmd = $WorkerCli.cmd
 if (-not $Session) { $Session = $cfg.psmuxSession }
 if (-not $BaseRef) { $BaseRef = "origin/$($cfg.defaultBranch)" }
 if (-not $Branch)  { $Branch  = "feature/$Name" }
@@ -81,12 +83,12 @@ if ($BootstrapFile) {
     Write-Error "Provide -Task <desc>, -Bootstrap <text>, or -BootstrapFile <path>"; exit 1
 }
 
-# --- 1. Verify psmux + claude.cmd are available -------------------------------
+# --- 1. Verify psmux + the worker CLI are available ---------------------------
 if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
     Write-Error "psmux not found on PATH. Install/confirm psmux before dispatching."; exit 1
 }
-if (-not (Test-Path $ClaudeCmd)) {
-    Write-Error "claude.cmd not found at $ClaudeCmd (config.workerCmdPath)"; exit 1
+if (-not (Test-Path $WorkerCmd)) {
+    Write-Error "Worker CLI not found at $WorkerCmd (workerCli '$($WorkerCli.name)'; cmd from config.workerCmdPath or workerCli.cmd)"; exit 1
 }
 
 # --- 2. Create or reuse the worktree ------------------------------------------
@@ -158,46 +160,67 @@ if ($existingWindow) {
 Step "Adding psmux window '$Name' rooted at $WtPath"
 psmux new-window -t $Session -n $Name -c $WtPath
 
-# --- 7. Launch Claude, handle the boot handshake, send bootstrap --------------
+# --- 7. Launch the worker CLI, drive the boot handshake, send bootstrap -------
+# All CLI-specific behavior comes from the resolved worker profile ($WorkerCli):
+# clearEnv, launch args, and the accept/ready capture-pane patterns. Nothing here
+# is hardcoded to a particular CLI. See Get-WorkerCliProfile in _session-config.ps1.
 $target = "${Session}:${Name}"
-Step "Launching Claude in $target (worker mode, --dangerously-skip-permissions)"
-# CRITICAL: clear CLAUDECODE in the pane FIRST. The psmux server inherited
-# CLAUDECODE=1 from the Claude that created the session, which makes the worker
-# think it's a nested sub-agent and DISABLES its Task tool — so it can't spawn
-# the specialized agent team and is forced to hand-build solo.
-psmux send-keys -t $target '$env:CLAUDECODE=$null; $env:CLAUDE_CODE_ENTRYPOINT=$null'
-Start-Sleep -Milliseconds 400
-psmux send-keys -t $target Enter
-Start-Sleep -Milliseconds 800
+$argLine    = ($WorkerCli.args -join ' ')
+$launchLine = if ($argLine) { "$WorkerCmd $argLine" } else { "$WorkerCmd" }
+Step "Launching worker CLI '$($WorkerCli.name)' in $target ($launchLine)"
+
+# Clear inherited env vars FIRST (profile.clearEnv). For Claude this nulls
+# CLAUDECODE/CLAUDE_CODE_ENTRYPOINT so the worker isn't treated as a nested
+# sub-agent (which would disable its Task tool / agent-team spawning).
+if ($WorkerCli.clearEnv.Count -gt 0) {
+    $clearLine = ($WorkerCli.clearEnv | ForEach-Object { "`$env:$_=`$null" }) -join '; '
+    psmux send-keys -t $target $clearLine
+    Start-Sleep -Milliseconds 400
+    psmux send-keys -t $target Enter
+    Start-Sleep -Milliseconds 800
+}
+
 # Invoke the launcher by BARE path and send Enter SEPARATELY. The call-operator
-# form (& "$ClaudeCmd" --flag) fractures through send-keys and PowerShell errors.
-psmux send-keys -t $target "$ClaudeCmd --dangerously-skip-permissions"
+# form (& "$cmd" --flag) fractures through send-keys and PowerShell errors.
+psmux send-keys -t $target $launchLine
 Start-Sleep -Seconds 1
 psmux send-keys -t $target Enter
 
-Step "Waiting for Claude to be ready (auto-handling the bypass-permissions accept screen)"
-$accepted = $false
-$ready = $false
-for ($i = 0; $i -lt 30; $i++) {
-    Start-Sleep -Seconds 3
-    $pane = (psmux capture-pane -t $target -p 2>$null) -join "`n"
-    $flat = ($pane -replace '\s', '')
-    if (-not $accepted -and ($flat -match 'Yes,Iaccept' -or $flat -match 'No,exit')) {
-        Step "Accepting the bypass-permissions screen (option 2)"
-        psmux send-keys -t $target "2" Enter
-        $accepted = $true
-        continue
+$hasPatterns = ($WorkerCli.acceptMatchAny.Count -gt 0) -or ($WorkerCli.readyMatchAny.Count -gt 0)
+if ($hasPatterns) {
+    Step "Waiting for '$($WorkerCli.name)' to be ready (auto-handling its accept screen if any)"
+    $accepted = $false
+    $ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 3
+        $pane = (psmux capture-pane -t $target -p 2>$null) -join "`n"
+        $flat = ($pane -replace '\s', '')
+        if (-not $accepted -and $WorkerCli.acceptMatchAny.Count -gt 0) {
+            $hit = $false
+            foreach ($pat in $WorkerCli.acceptMatchAny) { if ($flat.Contains($pat)) { $hit = $true; break } }
+            if ($hit) {
+                if ($WorkerCli.acceptSend) {
+                    Step "Accept screen detected - sending '$($WorkerCli.acceptSend)'"
+                    psmux send-keys -t $target $WorkerCli.acceptSend Enter
+                }
+                $accepted = $true
+                continue
+            }
+        }
+        if ($WorkerCli.readyMatchAny.Count -gt 0) {
+            $rhit = $false
+            foreach ($pat in $WorkerCli.readyMatchAny) { if ($flat.Contains($pat)) { $rhit = $true; break } }
+            if ($rhit) { $ready = $true; Step "REPL ready after ~$([int](($i + 1) * 3))s"; break }
+        }
     }
-    if ($flat -match 'bypasspermissionson') {
-        $ready = $true
-        Step "REPL ready after ~$([int](($i + 1) * 3))s"
-        break
-    }
+    if (-not $ready) { Step "WARN: did not positively detect the ready prompt; sending bootstrap anyway" }
+} else {
+    Step "Profile '$($WorkerCli.name)' has no accept/ready patterns - fixed boot wait $($WorkerCli.bootWaitSec)s"
+    Start-Sleep -Seconds $WorkerCli.bootWaitSec
 }
-if (-not $ready) { Step "WARN: did not positively detect the ready prompt; sending bootstrap anyway" }
 
 Step "Sending bootstrap message"
-psmux send-keys -t $target "Read .claude-bootstrap.md in this worktree root and follow it exactly. You are autonomous and running with --dangerously-skip-permissions: plan first, then build straight through to a PR. Do not stop to ask for permission or approval." Enter
+psmux send-keys -t $target "Read .claude-bootstrap.md in this worktree root and follow it exactly. You are an autonomous worker: plan first, then build straight through to a PR. Do not stop to ask for permission or approval." Enter
 
 # A long paste can absorb its own trailing Enter into the input box instead of
 # submitting. Send a standalone Enter to actually submit the prompt.

@@ -32,6 +32,7 @@ Derive:
 - `defaultBranch` = origin's default branch if detected, else the current branch, else `main`.
 - `githubRepo` = from `gh` if available, else ask.
 - `workerCmdPath` = the `.cmd` from `where.exe claude`; if only a non-.cmd path is found, prefer `C:\Users\<you>\AppData\Roaming\npm\claude.cmd`. Confirm it exists.
+- `workerCli` (optional) = which agent CLI the workers run. **Default: omit it (= the `claude` preset).** Only ask about this if the user wants non-Claude workers (Codex/Gemini/Qwen). If so, set `workerCmdPath` to that CLI and give `workerCli` an object with its real launch args + accept/ready patterns (see the "Worker CLI" section of the plugin README). Do NOT invent prompt strings for a CLI you can't verify — ask the user for them or start from the `generic` preset.
 
 ## Step 2 — Choose the layout (ask)
 
@@ -90,7 +91,7 @@ they actually have installed) — a Next.js + Supabase example:
 Write `<repoPath>\.claude\session-plugin.json` (create `.claude` if needed) with
 exactly the schema shown in the examples. Required top-level keys:
 `projectName, repoPath, worktreesPath, psmuxSession, githubRepo, defaultBranch,
-workerCmdPath, layout`. Optional: `devServer`, `teams`.
+workerCmdPath, layout`. Optional: `devServer`, `teams`, `workerCli`.
 
 Before writing, show the user the full JSON and confirm. After writing, validate
 by loading it:

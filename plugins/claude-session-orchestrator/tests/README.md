@@ -40,6 +40,9 @@ they are self-contained and run on any machine (no hardcoded user paths).
   absent or null) and `New-WorkerBrief` (branch, task text, test commands,
   `WORKTREE_STATUS: COMPLETE`/`BLOCKED` sentinels, and the `Closes #N` line
   driven by `-IssueNumber`).
+- **worker-cli-profile.Tests.ps1** — `Get-WorkerCliProfile`: the default (`claude`)
+  preset, the `generic` preset, unknown-preset throws, object overrides (every
+  field + `preset` extension), and `cmd` fallback to `workerCmdPath`.
 
 ## Out of scope (manual verification)
 

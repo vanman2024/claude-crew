@@ -3,6 +3,21 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-05-30
+
+### Added
+- **Data-driven worker-CLI profiles** (#1). The worker launch + boot handshake are
+  no longer hardcoded to Claude — they're resolved from an optional `workerCli`
+  config (a preset string or an override object) by `Get-WorkerCliProfile`.
+  `psmux-dispatch.ps1` drives `clearEnv` → launch (`cmd` + `args`) → accept/ready
+  capture-pane handshake (or a fixed `bootWaitSec`) entirely from the profile.
+  - Shipped presets: **`claude`** (verified; the previous behavior, and the default
+    when `workerCli` is omitted) and **`generic`** (fixed-wait, no accept handshake).
+  - Other CLIs (Codex/Gemini/Qwen) are wired via a `workerCli` object supplying their
+    real `args` / `clearEnv` / `accept` / `ready` patterns — no unverified prompt
+    strings are shipped. Orchestrator + headless dispatch remain Claude.
+  - Pester coverage for profile resolution (now 50 tests).
+
 ## [0.1.0] — 2026-05-29
 
 Initial release. A faithful, project-agnostic port of the proven per-project
