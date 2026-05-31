@@ -1,11 +1,21 @@
 # claude-session-orchestrator
 
 A **project-agnostic parallel-worktree build pipeline** for Claude Code on Windows.
-Spawn a crew of Claude workers — each in its own git worktree and its own
+Spawn a crew of agent-CLI workers — each in its own git worktree and its own
 [psmux](https://github.com/) window — let a dedicated orchestrator Claude poll
 and steer them on Claude Code's native `/loop`, and review the PRs they open.
 Everything is driven by one per-project config file. **No per-project script
 copies. Single source of truth, many consumers.**
+
+> **What's Claude and what isn't.** This is a **Claude Code plugin** — the skills,
+> the `/session` command, the orchestrator, and your conversational session all run
+> *in* Claude Code. The **workers** are CLI-agnostic: each pane just runs whatever
+> `workerCmdPath` points at. It **defaults to Claude** (`claude.cmd`), and the launch
+> is currently *Claude-tuned* (boot handshake, `--dangerously-skip-permissions`,
+> `CLAUDECODE` clearing). Other agent CLIs (Codex, etc.) work for the
+> worktree/psmux/brief mechanics but would need the handshake generalized per CLI —
+> a planned enhancement. See [Worker CLI](#worker-cli-workercmdpath) for the full
+> story. Short version: **scaffold is agent-agnostic; launch is Claude-tuned today.**
 
 This packages a build pipeline that was iterated to a working state as a
 per-project skill, into a distributable plugin. The working implementation is the
@@ -20,9 +30,11 @@ separate **orchestrator Claude** runs in its own psmux window and its own git
 worktree (detached HEAD at `origin/<defaultBranch>`). It polls workers on
 `/loop` — never via Windows cron or PowerShell sleep loops.
 
-**Workers.** Each is a Claude Code process running `--dangerously-skip-permissions`
-in its own psmux window, cwd = its own git worktree on a feature/fix branch. It
-plans, builds, tests, commits, pushes, opens a PR, then idles.
+**Workers.** Each is an **agent CLI** (whatever `workerCmdPath` is — Claude's
+`claude.cmd` by default, launched with `--dangerously-skip-permissions`) in its own
+psmux window, cwd = its own git worktree on a feature/fix branch. It plans, builds,
+tests, commits, pushes, opens a PR, then idles. The orchestrator only talks to the
+pane (`capture-pane` / `send-keys`), so it doesn't care which CLI runs there.
 
 **Build → Verify.** Parallel build phase (many workers), then a sequential verify
 phase (you + the conversational Claude in the main checkout). **Merges are always
@@ -44,8 +56,8 @@ psmux SESSION (= config.psmuxSession)
 - **psmux** (the Windows tmux port) on `PATH`
 - **git** with `core.longpaths=true`
 - **GitHub CLI** (`gh`) authenticated
-- **Claude Code** installed; know the full path to `claude.cmd`
-  (usually `C:\Users\<you>\AppData\Roaming\npm\claude.cmd`)
+- **Claude Code** — required to run the plugin itself (skills, `/session`, the orchestrator)
+- **A worker agent CLI** — the command each worker pane runs (`workerCmdPath`). Defaults to Claude's `claude.cmd` (usually `C:\Users\<you>\AppData\Roaming\npm\claude.cmd`); see [Worker CLI](#worker-cli-workercmdpath)
 - **Node.js** (used by the optional status hooks)
 
 ---
