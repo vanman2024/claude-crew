@@ -5,7 +5,7 @@
   "psmuxSession": "staffhive",
   "githubRepo": "vanman2024/staffhive",
   "defaultBranch": "master",
-  "claudeCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
+  "workerCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
   "devServer": { "port": 3000, "dir": "." },
   "layout": {
     "type": "root",
@@ -14,3 +14,4 @@
     "testCmd": "npx tsc --noEmit && pnpm test"
   }
 }
+

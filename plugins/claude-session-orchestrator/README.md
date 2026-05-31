@@ -92,10 +92,30 @@ hardcoded in the plugin. See [`examples/`](examples/) for full files.
 | `psmuxSession` | psmux session name (one per project) |
 | `githubRepo` | `owner/name` for `gh` |
 | `defaultBranch` | e.g. `master` or `main` |
-| `claudeCmdPath` | Full path to `claude.cmd` (psmux panes lack the npm PATH) |
+| `workerCmdPath` | Full path to the **agent CLI launched in each worker pane** (psmux panes lack the npm PATH, so use the full path). Defaults to Claude's `claude.cmd` — see "Worker CLI" below. |
 | `devServer` | `{ port, dir }` for the dev server (optional) |
 | `layout` | `root` or `monorepo-split` (see below) |
 | `teams` | Optional agent-team mapping (see Phase 2) |
+
+### Worker CLI (`workerCmdPath`)
+
+This plugin **is a Claude Code plugin** — the skills, the `/session` command, the
+orchestrator, and your conversational session all run *in Claude Code*. That part
+is inherently Claude.
+
+The **workers**, though, are CLI-agnostic. `workerCmdPath` is just the command the
+dispatch scripts launch in each psmux pane — the worktree + psmux + brief +
+orchestrator scaffold doesn't care what runs there. Today it defaults to Claude
+(`claude.cmd`), but the launch step is a single indirection point that could point
+at another agent CLI.
+
+**Honest caveat:** the launch is currently *tuned to Claude* — the boot handshake
+auto-handles Claude's bypass-permissions accept screen and waits for its "bypass
+permissions on" footer, the `--dangerously-skip-permissions` flag is Claude's, and
+the pane clears `CLAUDECODE`. Pointing `workerCmdPath` at a different CLI would work
+for the worktree/psmux mechanics but would need the handshake generalized per CLI
+(a planned enhancement). So: **scaffold is agent-agnostic; the launch is Claude-tuned
+today.**
 
 ### Layout: `root`
 
@@ -179,7 +199,7 @@ Stop it early: `psmux kill-window -t <session>:orchestrator`.
 ## Troubleshooting (lessons paid for)
 
 - **Worker can't spawn its agent team / Task tool disabled** — the psmux server inherited `CLAUDECODE=1`. The dispatch scripts clear it (`$env:CLAUDECODE=$null`) in the pane before launch. If you launch manually, do the same.
-- **`claude` not found in a pane** — psmux pwsh runs `-NoProfile` (no npm PATH). Always use the full `claudeCmdPath`.
+- **`claude` not found in a pane** — psmux pwsh runs `-NoProfile` (no npm PATH). Always use the full `workerCmdPath`.
 - **Worker died at launch / accept dialog** — the bypass-permissions accept screen needs option `2`, and the brief must be sent only after the "bypass permissions on" footer appears. The dispatch scripts poll `capture-pane` for this handshake instead of blind-sleeping.
 - **Nudge text sits unsubmitted at `❯`** — Claude swallows Enter while a tool runs. Send a standalone `psmux send-keys ... Enter` after the message; the scripts do this.
 - **Main repo's node_modules got gutted** — something ran `git worktree remove` with the junction still attached. Always tear down via `close-worker.ps1`.
@@ -247,3 +267,4 @@ project, since it has live side effects.
 ## License
 
 MIT
+

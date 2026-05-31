@@ -124,7 +124,7 @@ Describe "Get-SessionConfig" {
                 psmuxSession  = "x"
                 githubRepo    = "o/r"
                 defaultBranch = "main"
-                claudeCmdPath = "c"
+                workerCmdPath = "c"
                 layout        = @{ type = "root" }
             } | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $claudeDir "session-plugin.json")
             { Get-SessionConfig -RepoPath $root } | Should -Throw "*missing required field 'repoPath'*"
@@ -141,7 +141,7 @@ Describe "Get-SessionConfig" {
                 psmuxSession  = "x"
                 githubRepo    = "o/r"
                 defaultBranch = "main"
-                claudeCmdPath = "c"
+                workerCmdPath = "c"
                 layout        = @{ type = "polyrepo" }
             } | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $claudeDir "session-plugin.json")
             { Get-SessionConfig -RepoPath $root } | Should -Throw "*layout.type must be*"
@@ -158,7 +158,7 @@ Describe "Get-SessionConfig" {
                 psmuxSession  = "x"
                 githubRepo    = "o/r"
                 defaultBranch = "main"
-                claudeCmdPath = "c"
+                workerCmdPath = "c"
                 layout        = @{ envFiles = @(".env") }
             } | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $claudeDir "session-plugin.json")
             { Get-SessionConfig -RepoPath $root } | Should -Throw "*layout is missing 'type'*"
@@ -246,3 +246,4 @@ Describe "Get-WorktreePath / Get-PsmuxTarget" {
         Get-PsmuxTarget -Config $cfg -Name "fix-login" | Should -Be "redai:fix-login"
     }
 }
+

@@ -51,7 +51,7 @@ A worktree exists independently of psmux — psmux just runs a shell inside it.
 ### Pre-flight (once)
 
 1. `psmux ls` — confirm psmux is alive.
-2. Confirm `gh auth status`, that `claudeCmdPath` exists, and that the main repo
+2. Confirm `gh auth status`, that `workerCmdPath` exists, and that the main repo
    has installed deps at each `nodeModules` mapping (workers junction these — they
    do NOT install).
 3. Make sure the tasks you're parallelizing have clear acceptance criteria.
@@ -207,3 +207,4 @@ psmux kill-window -t <sess>:<name>
 psmux kill-session -t <sess>
 psmux kill-server          # nuclear: end ALL
 ```
+

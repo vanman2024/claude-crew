@@ -59,7 +59,7 @@ $cfg = Get-SessionConfig -Config $Config -RepoPath $RepoPath
 $RepoRoot  = $cfg.repoPath
 $WtBase    = $cfg.worktreesPath
 $WtPath    = Join-Path $WtBase $Name
-$ClaudeCmd = $cfg.claudeCmdPath
+$ClaudeCmd = $cfg.workerCmdPath
 if (-not $Session) { $Session = $cfg.psmuxSession }
 if (-not $BaseRef) { $BaseRef = "origin/$($cfg.defaultBranch)" }
 if (-not $Branch)  { $Branch  = "feature/$Name" }
@@ -86,7 +86,7 @@ if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
     Write-Error "psmux not found on PATH. Install/confirm psmux before dispatching."; exit 1
 }
 if (-not (Test-Path $ClaudeCmd)) {
-    Write-Error "claude.cmd not found at $ClaudeCmd (config.claudeCmdPath)"; exit 1
+    Write-Error "claude.cmd not found at $ClaudeCmd (config.workerCmdPath)"; exit 1
 }
 
 # --- 2. Create or reuse the worktree ------------------------------------------
@@ -210,4 +210,5 @@ Write-Host "WINDOW=$Name"
 Write-Host "TARGET=$target"
 Write-Host "WORKTREE=$WtPath"
 Write-Host "BRANCH=$Branch"
+
 

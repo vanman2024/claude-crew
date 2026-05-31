@@ -101,7 +101,7 @@ $env:CLAUDECODE = $null
 
 # Start claude NATIVELY in the worktree directory — no cd. Prompt arrives on stdin.
 # -WorkingDirectory sets the process's starting directory at the OS level
-$process = Start-Process -FilePath $cfg.claudeCmdPath `
+$process = Start-Process -FilePath $cfg.workerCmdPath `
     -ArgumentList $argString `
     -WorkingDirectory $wtPath `
     -NoNewWindow `
@@ -135,4 +135,5 @@ if (Test-Path $streamFile) {
 }
 
 exit $exitCode
+
 

@@ -67,7 +67,7 @@ function Get-SessionConfig {
     }
 
     # Required scalar fields
-    $required = @("projectName", "repoPath", "worktreesPath", "psmuxSession", "githubRepo", "defaultBranch", "claudeCmdPath", "layout")
+    $required = @("projectName", "repoPath", "worktreesPath", "psmuxSession", "githubRepo", "defaultBranch", "workerCmdPath", "layout")
     foreach ($key in $required) {
         if (-not ($cfg.PSObject.Properties.Name -contains $key) -or $null -eq $cfg.$key) {
             throw "session-plugin.json is missing required field '$key' (config: $path)"
@@ -169,3 +169,4 @@ function ConvertTo-SessionSlug {
     if (-not $s) { $s = "task" }
     return $s
 }
+

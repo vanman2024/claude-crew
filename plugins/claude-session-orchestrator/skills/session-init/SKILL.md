@@ -21,7 +21,7 @@ git rev-parse --show-toplevel          # -> repoPath (absolute)
 git rev-parse --abbrev-ref HEAD        # current branch (hint for defaultBranch)
 git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null   # -> origin's default branch (best source for defaultBranch)
 gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null   # -> githubRepo (owner/name)
-where.exe claude 2>/dev/null           # -> claudeCmdPath candidate (prefer the .cmd)
+where.exe claude 2>/dev/null           # -> workerCmdPath candidate (prefer the .cmd)
 ```
 
 Derive:
@@ -31,7 +31,7 @@ Derive:
 - `psmuxSession` = lowercased `projectName` with non-alphanumerics stripped.
 - `defaultBranch` = origin's default branch if detected, else the current branch, else `main`.
 - `githubRepo` = from `gh` if available, else ask.
-- `claudeCmdPath` = the `.cmd` from `where.exe claude`; if only a non-.cmd path is found, prefer `C:\Users\<you>\AppData\Roaming\npm\claude.cmd`. Confirm it exists.
+- `workerCmdPath` = the `.cmd` from `where.exe claude`; if only a non-.cmd path is found, prefer `C:\Users\<you>\AppData\Roaming\npm\claude.cmd`. Confirm it exists.
 
 ## Step 2 — Choose the layout (ask)
 
@@ -90,7 +90,7 @@ they actually have installed) — a Next.js + Supabase example:
 Write `<repoPath>\.claude\session-plugin.json` (create `.claude` if needed) with
 exactly the schema shown in the examples. Required top-level keys:
 `projectName, repoPath, worktreesPath, psmuxSession, githubRepo, defaultBranch,
-claudeCmdPath, layout`. Optional: `devServer`, `teams`.
+workerCmdPath, layout`. Optional: `devServer`, `teams`.
 
 Before writing, show the user the full JSON and confirm. After writing, validate
 by loading it:
@@ -105,7 +105,7 @@ If it throws, fix the field it names and re-write.
 
 Check the environment the pipeline needs and report PASS/FAIL for each:
 - `psmux ls` works (psmux installed)
-- the `claudeCmdPath` file exists
+- the `workerCmdPath` file exists
 - `gh auth status` is logged in
 - the main repo has installed deps at each `nodeModules` mapping (workers junction these — if absent, tell the user to install in the main repo first)
 
@@ -129,3 +129,4 @@ Launch the autonomous orchestrator (its own window, /loop polling, no auto-merge
 - Do NOT commit secrets — `.claude/session-plugin.json` holds only paths and the
   github repo slug, no tokens. It's safe to commit so the whole team shares it.
 - Re-running `/session-init` updates the file (show a diff and confirm before overwriting an existing config).
+

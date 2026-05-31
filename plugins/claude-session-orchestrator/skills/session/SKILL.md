@@ -26,7 +26,7 @@ Read  <project-root>/.claude/session-plugin.json
 
 If it's missing, tell the user to run `/session-init` to scaffold it. The fields
 you'll use: `projectName`, `repoPath`, `worktreesPath`, `psmuxSession`,
-`githubRepo`, `defaultBranch`, `claudeCmdPath`, `layout`, and optional `teams`.
+`githubRepo`, `defaultBranch`, `workerCmdPath`, `layout`, and optional `teams`.
 
 Throughout this doc, substitute:
 - `<repo>` → `repoPath`
@@ -97,7 +97,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 ## Critical Rules (preserved from the proven pipeline)
 
 1. **Use psmux, never Windows Terminal.** No `wt new-tab`, no SendKeys.
-2. **Full `claudeCmdPath` in panes** — psmux pwsh runs `-NoProfile`, so bare `claude` isn't found.
+2. **Full `workerCmdPath` in panes** — psmux pwsh runs `-NoProfile`, so bare `claude` isn't found.
 3. **Workers run `--dangerously-skip-permissions`** (scoped to their own branch, you review the PR). The orchestrator/main session does NOT.
 4. **CLAUDECODE is cleared in panes** before launch (the dispatch scripts do this) so workers can spawn the specialized agent team.
 5. **Boot handshake, not blind sleep** — dispatch polls `capture-pane`, auto-picks "2" on the accept screen, waits for the "bypass permissions on" footer before sending the brief.
@@ -222,4 +222,5 @@ To launch the orchestrator:
 ```
 powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
 ```
+
 

@@ -36,7 +36,7 @@ $ErrorActionPreference = "Stop"
 $cfg = Get-SessionConfig -Config $Config -RepoPath $RepoPath
 
 if (-not $Session) { $Session = $cfg.psmuxSession }
-$ClaudeCmd            = $cfg.claudeCmdPath
+$ClaudeCmd            = $cfg.workerCmdPath
 $MainRepo             = $cfg.repoPath
 $WtBase               = $cfg.worktreesPath
 $DefaultBranch        = $cfg.defaultBranch
@@ -45,7 +45,7 @@ $OrchestratorWorktree = Join-Path $WtBase "orchestrator"
 $CloseWorkerScript    = (Join-Path $PSScriptRoot "..\teardown\close-worker.ps1")
 if (Test-Path $CloseWorkerScript) { $CloseWorkerScript = (Resolve-Path $CloseWorkerScript).Path }
 
-if (-not (Test-Path $ClaudeCmd))                            { Write-Error "claude.cmd not found at $ClaudeCmd (config.claudeCmdPath)"; exit 1 }
+if (-not (Test-Path $ClaudeCmd))                            { Write-Error "claude.cmd not found at $ClaudeCmd (config.workerCmdPath)"; exit 1 }
 if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) { Write-Error "psmux not on PATH"; exit 1 }
 if (-not (Test-Path $MainRepo))                             { Write-Error "Main repo not found at $MainRepo (config.repoPath)"; exit 1 }
 
@@ -165,4 +165,5 @@ Write-Host "  Kill:      psmux kill-window -t $target"
 Write-Host ""
 Write-Host "Contract: NO auto-merge. Orchestrator reports PRs as READY FOR USER REVIEW." -ForegroundColor Yellow
 Write-Host "You authorize merges by telling your conversational Claude 'merge it'."
+
 

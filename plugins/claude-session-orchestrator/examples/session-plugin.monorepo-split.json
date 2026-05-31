@@ -5,7 +5,7 @@
   "psmuxSession": "redai",
   "githubRepo": "vanman2024/RedAI",
   "defaultBranch": "master",
-  "claudeCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
+  "workerCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
   "devServer": { "port": 3000, "dir": "frontend" },
   "layout": {
     "type": "monorepo-split",
@@ -54,3 +54,4 @@
     }
   }
 }
+

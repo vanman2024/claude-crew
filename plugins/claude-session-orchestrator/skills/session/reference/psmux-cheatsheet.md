@@ -4,7 +4,7 @@ Quick reference for **psmux** — the Windows tmux port (terminal multiplexer) t
 session orchestrator uses to run a worker Claude per git worktree.
 
 Placeholders (from `.claude/session-plugin.json`): `<sess>` = psmuxSession,
-`<repo>` = repoPath, `<wt>` = worktreesPath, `<claudeCmd>` = claudeCmdPath.
+`<repo>` = repoPath, `<wt>` = worktreesPath, `<workerCmd>` = workerCmdPath.
 
 ---
 
@@ -101,7 +101,7 @@ handshake. The raw commands, for reference:
 
 **Worker Claude** (in a worktree, will open a PR for review):
 ```powershell
-& "<claudeCmd>" --dangerously-skip-permissions
+& "<workerCmd>" --dangerously-skip-permissions
 ```
 The flag auto-approves tool uses — safe because the worker only touches its own
 branch and you review the PR. Without it, every tool call blocks on approval and
@@ -109,10 +109,10 @@ parallel throughput dies.
 
 **Orchestrator / direct main-repo Claude** (no PR safety gate): omit the flag.
 
-**Why `& "<claudeCmd>"` and not just `claude`:** psmux's pwsh launches with
+**Why `& "<workerCmd>"` and not just `claude`:** psmux's pwsh launches with
 `-NoProfile`, which skips the user PATH that contains the npm bin dir — so bare
 `claude` (and `claude.exe`) isn't found. The `claude.cmd` shim at the npm bin
-level works. This is why `claudeCmdPath` in the config must be the full path to
+level works. This is why `workerCmdPath` in the config must be the full path to
 `claude.cmd`.
 
 **Also clear `CLAUDECODE` first** when launching by hand:
@@ -170,3 +170,5 @@ psmux ls           # what's alive
 psmux ls -v        # verbose
 psmux kill-server  # nuclear: ends ALL sessions
 ```
+
+
