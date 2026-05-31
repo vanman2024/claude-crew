@@ -46,12 +46,44 @@ Show the two example configs for reference:
 
 ## Step 3 — Agent teams (ask, optional)
 
-Ask whether the project has specialized agents to declare (improves worker output
-quality — workers will use the right agent per file lane instead of
-`general-purpose`). If yes, gather `teams` as a map of teamName → `{ ownsPaths[], agents[], skills[] }`.
-If the project has no specialized agents yet, OMIT the `teams` section — the
-plugin falls back to a generic single-Claude build flow. Do not invent agent
-names; only record ones the user confirms exist in their environment.
+`teams` is the project's **roster of its OWN specialized agents/skills** (from
+installed plugins like `nextjs-frontend`, `fastapi-backend`, the `frontend-design`
+skill, etc.) — NOT a native team feature. Declaring it makes workers use the right
+agent per file lane instead of defaulting to `general-purpose`, which is the single
+biggest lever on output quality. See `build-protocol.md` for the full rationale.
+
+Ask whether the project has specialized agents to declare:
+
+- **If yes**, gather `teams` as a map of `teamName → { ownsPaths[], agents[], skills[] }`.
+  - `ownsPaths` = the file-lane globs that team owns (keep lanes disjoint).
+  - `agents` = the EXACT `subagent_type` names (e.g. `nextjs-frontend:component-builder-agent`).
+  - `skills` = skills that team should run (e.g. `frontend-design`).
+  - **Only record agents the user confirms are actually installed.** `teams` names
+    agents; it does not install them. If a named agent is missing at run time, the
+    worker prints `BLOCKED: <agent> unavailable` rather than falling back. So
+    confirm the agent-providing plugins are installed before listing their agents.
+- **If no** specialized agents yet, OMIT the `teams` section — the plugin falls
+  back to a generic single-Claude build flow.
+
+To make this concrete, offer the user this fresh-project template (adjust to what
+they actually have installed) — a Next.js + Supabase example:
+
+```jsonc
+"teams": {
+  "frontend": {
+    "ownsPaths": ["app/**", "components/**", "lib/**", "hooks/**"],
+    "agents": [
+      "nextjs-frontend:component-builder-agent",
+      "nextjs-frontend:page-generator-agent",
+      "nextjs-frontend:api-route-generator-agent",
+      "nextjs-frontend:supabase-integration-agent"
+    ],
+    "skills": ["frontend-design", "nextjs-frontend:design-system-enforcement"]
+  },
+  "data":    { "ownsPaths": ["supabase/migrations/**"], "agents": ["fastapi-backend:database-architect-agent"] },
+  "testing": { "agents": ["frontend-test-generator", "code-validator"] }
+}
+```
 
 ## Step 4 — Write the config
 

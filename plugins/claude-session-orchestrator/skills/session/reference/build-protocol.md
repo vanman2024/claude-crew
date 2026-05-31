@@ -77,6 +77,89 @@ genuinely parallel, non-overlapping work, but there is no required roster.
 
 ---
 
+## How to declare your teams (`config.teams`)
+
+> **`teams` is YOUR own agents, packaged — not a native "Teams" feature.** It is a
+> roster/manifest that points at the specialized agents and skills you already have
+> installed (from plugins like `nextjs-frontend`, `fastapi-backend`, the
+> `frontend-design` skill, etc.). The plugin does not provide these agents; it
+> *coordinates* the ones you name. (A future Claude multi-agent "Teams" primitive is
+> a Phase-2 design goal — the spawn step is a clean indirection so it can be swapped
+> in later — but it is not what `teams` uses today.)
+
+### Shape
+
+`teams` is a map of `teamName → { ownsPaths?, agents?, skills? }`:
+
+```jsonc
+"teams": {
+  "<teamName>": {
+    "ownsPaths": ["glob/**", "..."],   // the file lane this team owns (disjoint from others)
+    "agents":    ["plugin:agent-name", "repo-level-agent"],  // exact subagent_type names
+    "skills":    ["skill-name", "plugin:skill-name"]         // skills the team should run
+  }
+}
+```
+
+- `ownsPaths` keeps lanes disjoint so parallel agents never write the same files.
+- `agents` are the **exact** `subagent_type` names a worker passes to the Task tool.
+- `skills` are invoked via the Skill tool during that team's work.
+
+### Worked example — a fresh Next.js + Supabase project
+
+Say you're scaffolding a brand-new app and you have the `nextjs-frontend`,
+`fastapi-backend`, and `frontend-design` plugins installed. You'd declare:
+
+```jsonc
+"teams": {
+  "frontend": {
+    "ownsPaths": ["app/**", "components/**", "lib/**", "hooks/**"],
+    "agents": [
+      "nextjs-frontend:component-builder-agent",   // owns components/**
+      "nextjs-frontend:page-generator-agent",      // owns app/**/page.tsx
+      "nextjs-frontend:api-route-generator-agent", // owns app/api/**/route.ts
+      "nextjs-frontend:supabase-integration-agent" // data-access / query layer
+    ],
+    "skills": ["frontend-design", "nextjs-frontend:design-system-enforcement"]
+  },
+  "data": {
+    "ownsPaths": ["supabase/migrations/**"],
+    "agents": ["fastapi-backend:database-architect-agent"]
+  },
+  "testing": {
+    "agents": ["frontend-test-generator", "code-validator"]
+  }
+}
+```
+
+When a worker is dispatched to build a page, the brief generator turns that into
+explicit instructions in `.claude-bootstrap.md`, and the worker fires the lane
+agents **in one message** so they run concurrently:
+
+- `component-builder-agent` builds `components/**`
+- `page-generator-agent` builds `app/**/page.tsx`
+- `api-route-generator-agent` builds `app/api/**/route.ts`
+- `supabase-integration-agent` wires the data layer
+
+…then the worker runs the **API-contract verification pass** (frontend fetch types
+== route types == backend/Supabase types), then the `testing` team validates, then
+it commits → pushes → opens the PR.
+
+### The one requirement: the agents must actually be installed
+
+`teams` only *names* agents — it does not install them. The named agents/skills
+must be available in the environment where the worker Claude runs (i.e. those
+plugins are installed for that project/user). If a named agent is missing, the
+worker prints `BLOCKED: <agent> unavailable` and stops, rather than silently
+degrading to `general-purpose`. So: install the agent-providing plugins first,
+then list their agents in `teams`.
+
+`/session-init` will prompt you for this roster (and you can omit it entirely for
+the single-Claude fallback). You can also hand-edit `teams` in
+`.claude/session-plugin.json` at any time.
+
+---
+
 ## MANDATORY: Run Real Tests (NOT just visual clicking)
 
 After build steps, run the project's real test commands — the ones declared in
