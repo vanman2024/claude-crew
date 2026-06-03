@@ -1,4 +1,4 @@
-# psmux-dispatch-issues.ps1
+﻿# psmux-dispatch-issues.ps1
 #
 # BULK wrapper around psmux-dispatch.ps1. Pass one or more GitHub issue numbers;
 # this fetches each issue, builds a brief from its body (with the project's

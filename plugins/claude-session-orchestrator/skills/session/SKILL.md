@@ -58,6 +58,18 @@ psmux SESSION (= config.psmuxSession) — persistent, survives terminal closing
 | **Big bulk scaffolding** from a spec; **blasting an issue backlog** (N workers → N PRs) | Granular post-scaffold one-line fixes — those are one PR per issue on `<base>`-derived branches |
 | Multiple independent big pieces with little file overlap | Global changes (routing, auth, layout shell) — do those serially on `<base>` |
 
+**Disjoint file-lanes rule (learned the hard way):** dispatch **one worker per module / file-lane**. Do NOT run multiple issues that touch the *same* module's files in parallel — N workers each rewrite the shared file (e.g. that module's page) and **collide at merge time**. Parallelize **across** modules (disjoint files merge in any order); **sequence** issues *within* a module.
+
+## Merge protocol (when the user authorizes a merge)
+
+The orchestrator NEVER merges (Critical Rule 8). When the user says "merge it", the MAIN session does it — and **the order matters, based on which files each PR touched:**
+
+1. **Find overlap first:** `gh pr view <n> --json files --jq '.files[].path'` for every candidate PR. Any path touched by >1 PR means those PRs must be sequenced.
+2. **Disjoint PRs** (no shared files) → merge in any order, freely.
+3. **Overlapping PRs** → one at a time: merge the first → rebase the next onto updated `<base>` → resolve the shared-file conflicts → **re-verify** → merge → repeat. Each merge can flip another PR's `mergeable` flag to CONFLICTING, so re-check after every merge.
+4. **Squash-merge** each (one clean commit per feature; easy single-feature revert).
+5. **Verify BEFORE merge.** A green PR means *automated tests pass* (worker's tests + CI) — NOT that the feature behaves correctly. Checkout the branch **in its own worktree** (never the dirty main repo), smoke-test the real behavior, then merge. Re-verify overlapping PRs after each rebase, because the combination changed.
+
 ## Quick Reference
 
 | Command | What it does |

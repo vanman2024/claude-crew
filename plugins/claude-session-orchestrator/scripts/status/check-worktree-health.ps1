@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Name = "",
     [switch]$All,
     [switch]$Json,

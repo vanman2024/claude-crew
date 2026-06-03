@@ -1,4 +1,4 @@
-# nuke-worktrees.ps1
+﻿# nuke-worktrees.ps1
 #
 # Aggressive, last-resort teardown of EVERY worktree under the project's
 # worktrees path. Use when cleanup-worktrees leaves dirs STUCK because

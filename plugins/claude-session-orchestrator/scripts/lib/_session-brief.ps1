@@ -1,4 +1,4 @@
-# _session-brief.ps1
+﻿# _session-brief.ps1
 #
 # Brief generators. The worker brief is written to <worktree>/.claude-bootstrap.md
 # and is the ONLY thing the worker is told to read on launch. It must be

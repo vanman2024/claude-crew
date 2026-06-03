@@ -1,4 +1,4 @@
-# start-orchestrator.ps1
+﻿# start-orchestrator.ps1
 #
 # Spawns a dedicated Orchestrator Claude in its own psmux window, running from
 # its own git worktree at <worktreesPath>\orchestrator (detached HEAD at

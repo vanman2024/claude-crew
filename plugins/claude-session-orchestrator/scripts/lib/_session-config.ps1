@@ -1,4 +1,4 @@
-# _session-config.ps1
+﻿# _session-config.ps1
 #
 # Shared config loader + path helpers for claude-session-orchestrator.
 # Dot-source this from every script:

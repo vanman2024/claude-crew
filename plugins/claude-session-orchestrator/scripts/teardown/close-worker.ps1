@@ -1,4 +1,4 @@
-# close-worker.ps1
+﻿# close-worker.ps1
 #
 # Tear down a worker after its PR has been merged (or any time you want to
 # safely remove a worker worktree + its psmux window).

@@ -1,4 +1,4 @@
-# cleanup-worktrees.ps1
+﻿# cleanup-worktrees.ps1
 #
 # Remove ALL worker worktree directories under the project's worktrees path,
 # then prune stale git worktree references.

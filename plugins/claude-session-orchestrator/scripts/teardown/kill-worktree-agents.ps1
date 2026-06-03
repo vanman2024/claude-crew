@@ -1,4 +1,4 @@
-# kill-worktree-agents.ps1
+﻿# kill-worktree-agents.ps1
 #
 # Kill Claude agent processes running inside worker worktree directories
 # (never the main checkout). Targeted, lighter-weight cousin of nuke-worktrees:

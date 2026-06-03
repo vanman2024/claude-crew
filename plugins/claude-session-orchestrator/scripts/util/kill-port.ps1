@@ -1,4 +1,4 @@
-param([int]$Port)
+﻿param([int]$Port)
 $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($conns) {
     foreach ($c in $conns) {

@@ -1,4 +1,4 @@
-# psmux-dispatch.ps1
+﻿# psmux-dispatch.ps1
 #
 # Full worktree dispatch using psmux (the Windows tmux port). Project-agnostic:
 # every path / session / branch comes from the consuming project's
