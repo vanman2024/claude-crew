@@ -26,6 +26,16 @@
       }
     ]
   },
+  "dataFlow": {
+    "entities": ["User", "Order", "Payment", "Receipt", "Notification"],
+    "flows": [
+      "User creates Order -> Order created (status: pending)",
+      "Order triggers Payment -> Payment charges provider",
+      "Payment success -> Order.status = paid, DB updated",
+      "Order paid -> Notification sends Receipt to User"
+    ],
+    "notes": "One Order per checkout. Payment is the only writer of Order.status. Frontend, backend, and data lanes all build against THESE entities — no parallel definitions."
+  },
   "teams": {
     "frontend": {
       "ownsPaths": ["frontend/components/**", "frontend/app/**", "frontend/lib/**", "frontend/hooks/**"],

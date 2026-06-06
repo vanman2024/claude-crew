@@ -86,12 +86,41 @@ they actually have installed) — a Next.js + Supabase example:
 }
 ```
 
-## Step 4 — Write the config
+## Step 4 — Data-flow map (ask, optional)
+
+A `dataFlow` map is the single strongest lever against cross-lane redundancy:
+without it, each parallel lane invents its own version of the same entity (the
+"seventeen versions of one object" problem). When declared, the SAME map is injected
+into every worker's brief as a shared contract. See `build-protocol.md` for the
+rationale. (When omitted, each worker is told to map the flow itself before planning
+— so this is purely an upgrade, never required.)
+
+Ask if the user wants to declare a canonical data-flow map now. If yes, capture it
+as a top-level `dataFlow` — a plain string, or an object with `entities` / `flows` /
+`notes`:
+
+```jsonc
+"dataFlow": {
+  "entities": ["User", "Order", "Payment", "Receipt", "Notification"],
+  "flows": [
+    "User creates Order -> Order created (status: pending)",
+    "Order triggers Payment -> Payment charges provider",
+    "Payment success -> Order.status = paid, DB updated",
+    "Order paid -> Notification sends Receipt to User"
+  ],
+  "notes": "One Order per checkout. Payment is the only writer of Order.status."
+}
+```
+
+Keep it to a 60-second outline (entities, source, destination, what changes) — not a
+giant architecture doc. It can be hand-edited in the config any time.
+
+## Step 5 — Write the config
 
 Write `<repoPath>\.claude\session-plugin.json` (create `.claude` if needed) with
 exactly the schema shown in the examples. Required top-level keys:
 `projectName, repoPath, worktreesPath, psmuxSession, githubRepo, defaultBranch,
-workerCmdPath, layout`. Optional: `devServer`, `teams`, `workerCli`.
+workerCmdPath, layout`. Optional: `devServer`, `teams`, `dataFlow`, `workerCli`.
 
 Before writing, show the user the full JSON and confirm. After writing, validate
 by loading it:
@@ -102,7 +131,7 @@ powershell.exe -ExecutionPolicy Bypass -Command ". '${CLAUDE_PLUGIN_ROOT}/script
 
 If it throws, fix the field it names and re-write.
 
-## Step 5 — Preflight + next steps
+## Step 6 — Preflight + next steps
 
 Check the environment the pipeline needs and report PASS/FAIL for each:
 - `psmux ls` works (psmux installed)

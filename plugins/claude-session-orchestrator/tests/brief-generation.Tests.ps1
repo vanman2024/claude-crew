@@ -73,6 +73,59 @@ Describe "Format-TeamsSection" {
     }
 }
 
+Describe "Format-DataFlowSection" {
+
+    Context "with dataFlow declared as an object" {
+        BeforeAll {
+            $script:Section = Format-DataFlowSection -Config (Get-MonorepoConfig)
+        }
+
+        It "renders the canonical entities and flows" {
+            $script:Section | Should -Match 'CANONICAL data-flow map'
+            $script:Section | Should -Match 'User, Order, Payment, Receipt, Notification'
+            $script:Section | Should -Match 'Payment success -> Order.status = paid'
+        }
+
+        It "renders the notes when present" {
+            $script:Section | Should -Match 'One Order per checkout'
+        }
+
+        It "always includes the no-new-entities rails" {
+            $script:Section | Should -Match 'Rails \(non-negotiable\)'
+            $script:Section.Contains('Do NOT') | Should -BeTrue
+            $script:Section.Contains('second version of something') | Should -BeTrue
+        }
+    }
+
+    Context "with dataFlow declared as a string" {
+        It "renders the raw string and the rails" {
+            $cfg = Get-MonorepoConfig
+            $cfg.dataFlow = 'user -> order -> payment -> db -> receipt'
+            $section = Format-DataFlowSection -Config $cfg
+            $section | Should -Match 'user -> order -> payment -> db -> receipt'
+            $section | Should -Match 'Rails \(non-negotiable\)'
+        }
+    }
+
+    Context "without dataFlow" {
+        It "returns the map-it-yourself fallback when the property is removed" {
+            $cfg = Get-MonorepoConfig
+            $cfg.PSObject.Properties.Remove('dataFlow')
+            $section = Format-DataFlowSection -Config $cfg
+            $section | Should -Match 'write a 60-second data-flow map'
+            $section | Should -Not -Match 'CANONICAL data-flow map'
+            $section | Should -Match 'Rails \(non-negotiable\)'
+        }
+
+        It "returns the fallback when dataFlow is null" {
+            $cfg = Get-MonorepoConfig
+            $cfg.dataFlow = $null
+            $section = Format-DataFlowSection -Config $cfg
+            $section | Should -Match 'write a 60-second data-flow map'
+        }
+    }
+}
+
 Describe "New-WorkerBrief" {
 
     BeforeAll {
@@ -117,5 +170,16 @@ Describe "New-WorkerBrief" {
         $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText -Title "Password reset"
         $brief | Should -Match 'RedAI'
         $brief | Should -Match '\*\*Task:\*\* Password reset'
+    }
+
+    It "embeds the data-flow map step before the plan step" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
+        $brief | Should -Match '## 3\. Map the data flow'
+        $brief | Should -Match '## 4\. Plan first'
+        $brief | Should -Match 'CANONICAL data-flow map'
+        # the map must come before the plan step
+        $mapIdx  = $brief.IndexOf('Map the data flow')
+        $planIdx = $brief.IndexOf('Plan first')
+        ($mapIdx -lt $planIdx -and $mapIdx -ge 0) | Should -BeTrue
     }
 }

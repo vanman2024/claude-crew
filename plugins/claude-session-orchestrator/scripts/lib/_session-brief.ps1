@@ -59,6 +59,65 @@ non-overlapping work, but there is no required agent roster.
     return $sb.ToString()
 }
 
+# Render the data-flow map section. A project MAY declare config.dataFlow as the
+# canonical map (a string, or an object with entities/flows/notes). When declared,
+# it is injected into EVERY worker brief as a shared contract so parallel lanes do
+# not each invent their own version of the same entity. When absent, the worker is
+# told to produce a quick map itself before planning.
+function Format-DataFlowSection {
+    param([Parameter(Mandatory)]$Config)
+
+    $rails = @"
+**Rails (non-negotiable):** generate code that strictly follows this map. Do NOT
+introduce new entities, state, or flows unless THIS task explicitly requires them.
+REUSE existing entities/types/services — never create a second version of something
+that already exists (no ``OrderV2`` beside ``Order``, no parallel ``UserData`` beside
+``User``). If the task genuinely needs a new entity or flow, name it in your plan and
+say why BEFORE writing it.
+"@
+
+    if (-not ($Config.PSObject.Properties.Name -contains "dataFlow") -or $null -eq $Config.dataFlow) {
+        return @"
+Before you plan, write a 60-second data-flow map for THIS task — not a giant
+architecture doc. Ground it in entities that ALREADY exist in the codebase (you
+explored in step 1). Capture four things:
+- **Entities** — the main objects this task touches (reuse existing ones by name).
+- **Source** — where the data comes from (request, queue, DB, external API).
+- **Destination** — where it goes (DB table, response, event, notification).
+- **Transforms** — what changes at each hop.
+
+Example shape: ``user creates order -> order triggers payment -> payment updates DB -> notification sends receipt``.
+
+$rails
+"@
+    }
+
+    $df = $Config.dataFlow
+    $body = New-Object System.Text.StringBuilder
+    [void]$body.AppendLine("This project declares a CANONICAL data-flow map. It is the shared contract for")
+    [void]$body.AppendLine("every lane — all agents build against THESE entities and flows, not invented ones:")
+    [void]$body.AppendLine("")
+
+    if ($df -is [string]) {
+        [void]$body.AppendLine($df)
+    } else {
+        if (($df.PSObject.Properties.Name -contains "entities") -and $df.entities) {
+            [void]$body.AppendLine("**Entities:** $((($df.entities) -join ', '))")
+        }
+        if (($df.PSObject.Properties.Name -contains "flows") -and $df.flows) {
+            [void]$body.AppendLine("**Flows:**")
+            foreach ($f in $df.flows) { [void]$body.AppendLine("- $f") }
+        }
+        if (($df.PSObject.Properties.Name -contains "notes") -and $df.notes) {
+            [void]$body.AppendLine("")
+            [void]$body.AppendLine([string]$df.notes)
+        }
+    }
+    [void]$body.AppendLine("")
+    [void]$body.AppendLine($rails)
+    return $body.ToString()
+}
+
 # Render the test-command block from config.layout.
 function Format-TestSection {
     param([Parameter(Mandatory)]$Config)
@@ -85,8 +144,9 @@ function New-WorkerBrief {
         [string]$Title
     )
 
-    $teams = Format-TeamsSection -Config $Config
-    $tests = Format-TestSection -Config $Config
+    $teams    = Format-TeamsSection -Config $Config
+    $dataflow = Format-DataFlowSection -Config $Config
+    $tests    = Format-TestSection -Config $Config
     $base  = $Config.defaultBranch
     $repo  = $Config.githubRepo
 
@@ -112,17 +172,22 @@ $titleLine
 
 $Task
 
-## 3. Plan first (do NOT write code yet)
-List every file you will create or modify and what each change does. Identify conflicts/risks. Stay focused on THIS task; if you find unrelated bugs, log them as separate GitHub issues — do not pivot.
+## 3. Map the data flow (before you plan)
+Structure comes first, speed second. Pin down how data moves through this task BEFORE writing code, so you (and every parallel lane) build against ONE set of entities instead of each inventing your own.
+
+$dataflow
+
+## 4. Plan first (do NOT write code yet)
+List every file you will create or modify and what each change does. Each change must trace back to an entity/flow in the data-flow map above. Identify conflicts/risks. Stay focused on THIS task; if you find unrelated bugs, log them as separate GitHub issues — do not pivot.
 
 $teams
 
-## 4. Test before commit — fix ALL failures
+## 5. Test before commit — fix ALL failures
 $tests
 
 Do NOT create a PR with failing tests or type errors.
 
-## 5. Commit, push, PR
+## 6. Commit, push, PR
 Use plain inline commit messages (no temp file, no backticks). Then:
 
 ``````
@@ -132,7 +197,7 @@ git push -u origin $Branch
 gh pr create --repo $repo --base $base --head $Branch --title "<type>($Name): <descriptive summary>" --body "<summary>.$closes"
 ``````
 
-## 6. Signal completion
+## 7. Signal completion
 When the PR is open and tests pass, output EXACTLY:
 
 ``````
