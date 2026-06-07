@@ -21,10 +21,10 @@ sub-command below is written to honor them. Read them first.
    ("merge it"). There is no exception, no "CI is green so I'll merge" shortcut.
 
 2. **Batch-scoping.** "This batch" = PRs whose head branch matches an **ACTIVE git worktree
-   under `<wt>/`**, excluding the orchestrator's own worktree at `<wt>/orchestrator`. To compute
-   the batch on every poll:
+   under `<wt>/`**, excluding the infra worktrees (`<wt>/orchestrator`, `<wt>/reviewer`,
+   `<wt>/review-checkout`). To compute the batch on every poll:
    - `git -C <repo> worktree list --porcelain` → all active worktrees + their branches (parse each `branch refs/heads/<name>` line).
-   - **Skip** the orchestrator's own worktree at `<wt>/orchestrator` (detached HEAD, no branch line).
+   - **Skip** the infra worktrees: `<wt>/orchestrator`, `<wt>/reviewer`, `<wt>/review-checkout` (detached HEAD, no branch line — these are the orchestrator + reviewer, not workers).
    - `gh pr list --repo <gh> --state open --json number,title,headRefName,statusCheckRollup,mergeable` → all open PRs.
    - **Filter:** keep ONLY PRs whose `headRefName` matches one of the active worktree branches.
 
@@ -149,7 +149,7 @@ Everything else is out of scope for this poll.
    ```
    psmux list-windows -t <sess>
    ```
-   Skip the `orchestrator` window itself.
+   Skip the infra windows: `orchestrator` and `reviewer`.
 2. For each worker window:
    ```
    psmux capture-pane -t <sess>:<name> -p
@@ -179,7 +179,14 @@ For each batch PR:
 - **CI failing** → report it and nudge the owning worker to fix (the worker rebases/fixes in its own worktree; the orchestrator does NOT touch git in `<repo>` — Contract 5).
 - **CI still running** → note it; the next poll will catch it.
 
-### Phase 4: Verify Work (optional)
+### Phase 4: Verify Work (optional — the reviewer does the deep pass)
+
+> The **reviewer** (`/session review`, spawned by `start-reviewer.ps1` alongside this
+> orchestrator) does the real pre-merge verification: it checks each green PR out in its
+> own `review-checkout` worktree, runs the project tests + `/code-review`, and labels it
+> `READY-VERIFIED`. The orchestrator's verify below is a *shallow* deliverable-existence
+> check; leave the deep gate to the reviewer and don't duplicate it. See
+> [commands-review.md](commands-review.md).
 
 For batch PRs, optionally verify the agent built what the brief asked:
 1. Read the task brief (`.claude-bootstrap.md`) and any spec it points to — extract key deliverables.

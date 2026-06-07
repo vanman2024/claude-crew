@@ -27,7 +27,10 @@ param(
     [string]$RepoPath,
     [string]$Session,
     [string]$Window      = "orchestrator",
-    [int]   $IntervalMin = 5
+    [int]   $IntervalMin = 5,
+    # By default, also spawn the Reviewer Claude (the overseer that verifies PRs as
+    # they go green). Pass -NoReviewer to launch the orchestrator alone.
+    [switch]$NoReviewer
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,12 +91,12 @@ Your cwd is **$OrchestratorWorktree** — a git worktree detached at origin/$Def
 
 BATCH SCOPING (critical — read before the contract):
 
-"This batch" = PRs whose head branch matches an ACTIVE git worktree in ``$wtBaseFwd/`` (excluding your own at ``$orchFwd``).
+"This batch" = PRs whose head branch matches an ACTIVE git worktree in ``$wtBaseFwd/`` (excluding the infra worktrees: your own ``orchestrator`` and the reviewer's ``reviewer`` + ``review-checkout``).
 
 To identify your batch on every poll:
 
 1. ``git -C $mainFwd worktree list --porcelain`` -> all active worktrees and their branches. Parse each ``branch refs/heads/<name>`` line.
-2. **Skip** your own worktree at ``$orchFwd`` (detached HEAD, no branch line).
+2. **Skip** the infra worktrees: your own at ``$orchFwd``, plus ``$wtBaseFwd/reviewer`` and ``$wtBaseFwd/review-checkout`` (the reviewer is a sibling overseer, not a worker).
 3. ``gh pr list --repo $($cfg.githubRepo) --state open --json number,title,headRefName,statusCheckRollup,mergeable`` -> all open PRs.
 4. **Filter:** keep only PRs whose ``headRefName`` matches one of the active worktree branches from step 1.
 
@@ -102,7 +105,7 @@ PRs whose worktrees were already torn down are OUTSIDE your scope. PRs from prev
 CONTRACT (do not violate):
 
 1. Every $IntervalMin minutes, poll the worker panes.
-2. ``psmux list-windows -t $Session`` to see live workers. Skip yourself (the window named ``$Window``).
+2. ``psmux list-windows -t $Session`` to see live workers. Skip the infra windows: yourself (``$Window``) and ``reviewer``.
 3. For each worker: ``psmux capture-pane -t ${Session}:<worker> -p`` and analyze state.
 4. ``psmux send-keys -t ${Session}:<worker> "<nudge>" Enter`` to steer stuck workers.
 5. ``gh pr list --repo $($cfg.githubRepo) --state open --json number,title,headRefName,statusCheckRollup,mergeable`` for PR status, then **filter to the batch** (see BATCH SCOPING) — ignore PRs whose branch is not in an active worktree.
@@ -165,5 +168,25 @@ Write-Host "  Kill:      psmux kill-window -t $target"
 Write-Host ""
 Write-Host "Contract: NO auto-merge. Orchestrator reports PRs as READY FOR USER REVIEW." -ForegroundColor Yellow
 Write-Host "You authorize merges by telling your conversational Claude 'merge it'."
+
+# 10. Also spawn the Reviewer Claude (the overseer) unless opted out. It verifies
+#     each green PR (tests + /code-review) one at a time and produces an ordered,
+#     verified merge queue — so the orchestrator's "READY FOR USER REVIEW" PRs are
+#     actually proven before you merge them.
+if (-not $NoReviewer) {
+    $reviewerScript = (Join-Path $PSScriptRoot "start-reviewer.ps1")
+    if (Test-Path $reviewerScript) {
+        Write-Host ""
+        Write-Host "[start-orchestrator] Spawning the Reviewer (overseer) too — use -NoReviewer to skip." -ForegroundColor Cyan
+        $reviewerArgs = @{ Session = $Session; IntervalMin = $IntervalMin }
+        if ($Config)   { $reviewerArgs.Config   = $Config }
+        if ($RepoPath) { $reviewerArgs.RepoPath = $RepoPath }
+        & $reviewerScript @reviewerArgs
+    } else {
+        Write-Host "[start-orchestrator] WARN: start-reviewer.ps1 not found next to this script; skipping reviewer." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "[start-orchestrator] -NoReviewer set — reviewer NOT launched. Start it later with /session review-start." -ForegroundColor DarkGray
+}
 
 

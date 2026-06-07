@@ -120,7 +120,11 @@ giant architecture doc. It can be hand-edited in the config any time.
 Write `<repoPath>\.claude\session-plugin.json` (create `.claude` if needed) with
 exactly the schema shown in the examples. Required top-level keys:
 `projectName, repoPath, worktreesPath, psmuxSession, githubRepo, defaultBranch,
-workerCmdPath, layout`. Optional: `devServer`, `teams`, `dataFlow`, `workerCli`.
+workerCmdPath, layout`. Optional: `devServer`, `teams`, `dataFlow`, `review`, `workerCli`.
+
+> `review` (optional) configures the **reviewer** (overseer) loop that verifies each PR
+> (tests + `/code-review`) before you merge. Shape: `{ "intervalMin": 5 }`. Omit it for the
+> 5-minute default. The reviewer is auto-launched alongside the orchestrator.
 
 Before writing, show the user the full JSON and confirm. After writing, validate
 by loading it:

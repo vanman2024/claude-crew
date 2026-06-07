@@ -1,7 +1,7 @@
 ---
 name: session
-description: Start, resume, finish, monitor, and orchestrate parallel git-worktree build sessions on Windows using psmux. Spawns Claude workers per worktree, polls them on /loop, reviews their PRs. Project-agnostic — driven by .claude/session-plugin.json. Triggers on "/session", "start a worktree", "dispatch workers", "orchestrate the build", "blast through these issues".
-argument-hint: "[list|start|start-issues|resume|finish|pull|cleanup|monitor|server-start|server-check|server-stop|orchestrate] [name|issue-numbers]"
+description: Start, resume, finish, monitor, orchestrate, and review parallel git-worktree build sessions on Windows using psmux. Spawns Claude workers per worktree, polls them on /loop, and runs a dedicated reviewer that verifies each PR (tests + /code-review) before you merge. Project-agnostic — driven by .claude/session-plugin.json. Triggers on "/session", "start a worktree", "dispatch workers", "orchestrate the build", "review the PRs", "blast through these issues".
+argument-hint: "[list|start|start-issues|resume|finish|pull|cleanup|monitor|server-start|server-check|server-stop|orchestrate|review|review-start] [name|issue-numbers]"
 disable-model-invocation: false
 allowed-tools: Bash(git *), Bash(gh *), Bash(node *), Bash(bash *), Bash(pwsh *), Bash(psmux *), Bash(powershell.exe *), Bash(cmd.exe *), Bash(pwd), Bash(cat *), Read, Glob, Grep
 ---
@@ -84,6 +84,8 @@ The orchestrator NEVER merges (Critical Rule 8). When the user says "merge it", 
 | `monitor <name>` | Single poll cycle: capture-pane → analyze → send-keys if needed |
 | `server-start/check/stop` | Manage a detached dev server for a worktree |
 | `orchestrate [...]` | Unified loop: dashboard / dispatch / poll / verify / pull / cleanup |
+| `review` | One reviewer cycle: check out the next green PR, run tests + `/code-review`, label `READY-VERIFIED`, update the ordered merge queue. The `/loop` body. |
+| `review-start` | Spawn the dedicated **Reviewer** Claude (the overseer) in its own window + `/loop`. Auto-launched by the orchestrator. |
 
 ## Scripts (in this plugin, under `scripts/`)
 
@@ -96,7 +98,8 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 |--------|---------|
 | `dispatch/psmux-dispatch.ps1` | **Primary dispatch.** worktree + env copy + node_modules junction + psmux window + Claude launch (boot handshake) + bootstrap. `-Name` + one of `-Task` / `-Bootstrap` / `-BootstrapFile`. Auto-injects the project's agent-team rules when given `-Task`. |
 | `dispatch/psmux-dispatch-issues.ps1` | **Bulk dispatch.** `-Issues 510,511,512` (or positional). Fetches each issue, builds a brief, dispatches per issue. |
-| `dispatch/start-orchestrator.ps1` | Spawn the dedicated orchestrator Claude in its own detached worktree + window with the no-auto-merge + batch-scoped brief, then `/loop`. `-IntervalMin 5`. |
+| `dispatch/start-orchestrator.ps1` | Spawn the dedicated orchestrator Claude in its own detached worktree + window with the no-auto-merge + batch-scoped brief, then `/loop`. `-IntervalMin 5`. Also spawns the reviewer unless `-NoReviewer`. |
+| `dispatch/start-reviewer.ps1` | Spawn the dedicated **reviewer** Claude (the overseer) in its own home worktree + a `review-checkout` worktree + window. Verifies each green PR (tests + `/code-review`) one at a time, labels `READY-VERIFIED`, builds the ordered queue, then `/loop`. `-IntervalMin 5`. Never merges. |
 | `dispatch/dispatch-worktree.ps1` | Headless one-shot `claude -p` (logs to file) — when you do NOT want an interactive pane |
 | `teardown/close-worker.ps1` | **Junction-first** post-merge teardown. `-Name <worker>`. |
 | `teardown/cleanup-worktrees.ps1` / `nuke-worktrees.ps1` / `kill-worktree-agents.ps1` | Cleanup helpers |
@@ -117,6 +120,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 7. **Junction-first teardown** — `close-worker.ps1` detaches the node_modules junction(s) BEFORE `git worktree remove`. Never `git worktree remove` a worktree whose junctions are still attached.
 8. **No auto-merge.** The orchestrator never runs `gh pr merge`. Merges are user-authorized ("merge it").
 9. **`/loop` is the cron.** Never use Windows scheduled tasks or PowerShell `Start-Sleep` polling loops. The PS scripts' job ends after launching Claude.
+10. **Reviewer verifies in its OWN checkout worktree, never the main repo.** The reviewer (overseer) checks out PR branches only in `<wt>/review-checkout`, runs tests + `/code-review` there, labels `READY-VERIFIED`, and produces an ordered merge queue. It NEVER merges (Rule 8) and NEVER touches `<repo>`'s working state (like the orchestrator). One PR at a time, sequenced by file overlap.
 
 ## Detailed References
 
@@ -126,6 +130,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 - `pull` — [reference/commands-pull.md](reference/commands-pull.md)
 - `cleanup` — [reference/commands-cleanup.md](reference/commands-cleanup.md)
 - `orchestrate` — [reference/commands-orchestrate.md](reference/commands-orchestrate.md)
+- `review` / `review-start` (the reviewer/overseer loop) — [reference/commands-review.md](reference/commands-review.md)
 - build protocol (teams, testing, sub-agents) — [reference/build-protocol.md](reference/build-protocol.md)
 - psmux command + keyboard reference — [reference/psmux-cheatsheet.md](reference/psmux-cheatsheet.md)
 - the full start/middle/end parallel workflow — [reference/psmux-workflow.md](reference/psmux-workflow.md)
@@ -230,9 +235,41 @@ self-terminate when no workers and no batch PRs remain. See
 [reference/commands-orchestrate.md](reference/commands-orchestrate.md) — it bakes
 in the no-auto-merge + batch-scoping contracts.
 
-To launch the orchestrator:
+To launch the orchestrator (which also launches the reviewer unless `-NoReviewer`):
 ```
 powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
 ```
+
+---
+
+## `review`
+
+**ONE reviewer cycle** — the body of the reviewer's `/loop`. Run from the dedicated
+**Reviewer Claude** (the overseer) spawned by `start-reviewer.ps1` into `<sess>:reviewer`.
+
+Compute the batch (open PRs whose branch matches an active worker worktree) → order by
+file overlap → take the first un-verified green PR → check it out in `<wt>/review-checkout`
+→ run the project's `config.layout` tests → run `/code-review` on the diff → label it
+`READY-VERIFIED` (PASS) or request changes + nudge the worker (FAIL) → report the ordered
+verified queue. **One PR per pass, never merges.** Self-terminate when no live workers and
+no open batch PRs remain. See [reference/commands-review.md](reference/commands-review.md)
+for the full protocol + contracts.
+
+The reviewer is the automated form of the pre-merge verification in the Merge protocol
+above: green CI is not enough; each PR is tested **and** reviewed in its own worktree
+before it reaches your `READY-VERIFIED` queue, so "merge it" is acting on proven work.
+
+---
+
+## `review-start`
+
+Spawn the dedicated reviewer Claude (its own home + checkout worktrees + psmux window +
+`/loop`). Auto-launched by `start-orchestrator.ps1`; run it standalone when you started
+workers without the orchestrator:
+```
+powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-reviewer.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
+```
+Interval resolves from `-IntervalMin`, else `config.review.intervalMin`, else 5 minutes.
+Stop: `psmux kill-window -t <sess>:reviewer` (or it self-terminates).
 
 
