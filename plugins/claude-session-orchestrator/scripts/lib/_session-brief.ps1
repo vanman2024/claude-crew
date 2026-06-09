@@ -122,7 +122,7 @@ $rails
 function Format-TestSection {
     param([Parameter(Mandatory)]$Config)
     $cmds = Get-TestCommands -Config $Config
-    if (-not $cmds -or $cmds.Count -eq 0) {
+    if (-not $cmds -or @($cmds).Count -eq 0) {
         return "Run whatever test/typecheck commands this project uses, and fix ALL failures before committing."
     }
     $lines = @()

@@ -1,4 +1,4 @@
-# start-reviewer.ps1
+﻿# start-reviewer.ps1
 #
 # Spawns a dedicated Reviewer Claude in its own psmux window — the "overseer" that
 # verifies worker PRs one at a time as they go green, so nothing is merged blind.
