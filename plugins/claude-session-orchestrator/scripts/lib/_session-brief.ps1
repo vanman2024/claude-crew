@@ -168,6 +168,11 @@ $titleLine
 2. Confirm location: ``git branch --show-current`` should print ``$Branch`` and ``pwd`` should be this worktree.
 3. Explore the relevant code before writing anything (use the Explore agent or read files directly).
 
+## VERIFY the API before you build it - NEVER from memory
+Before writing code against ANY framework / library / SDK / external service (Mastra, CATS, Multilead/Skylead, Unipile, Twilio, Supabase, Vercel AI SDK, shadcn, etc.), CONSULT its authoritative reference FIRST - its MCP docs server, its skill, or its installed docs (``node_modules/<pkg>/dist/docs``, or a ``.claude/skills/<name>``). Your training knowledge of these APIs is almost certainly STALE. Do NOT guess signatures, option names, import paths, or types.
+- Look it up, THEN build to the verified API. One guessed call (e.g. passing a plain object where a ``RequestContext`` instance is required) compiles clean but breaks at runtime and is not caught until integration - which wastes the whole parallel run.
+- If the needed reference is NOT available in this environment (the MCP server is not connected, the skill is not installed, the docs are not in ``node_modules``): do NOT improvise or build it how you think it should work. Output ``BLOCKED: need <reference> to build <what>`` and STOP - report back to the orchestrator and ask for that reference. Wait for it; do not proceed on a guess.
+
 ## 2. The task
 
 $Task
