@@ -91,69 +91,12 @@ if (-not (Test-Path $WorkerCmd)) {
     Write-Error "Worker CLI not found at $WorkerCmd (workerCli '$($WorkerCli.name)'; cmd from config.workerCmdPath or workerCli.cmd)"; exit 1
 }
 
-# --- 2. Create or reuse the worktree ------------------------------------------
-if (Test-Path $WtPath) {
-    Step "Worktree already exists at $WtPath - reusing"
-} else {
-    Step "Fetching $BaseRef"
-    git -C $RepoRoot fetch origin $cfg.defaultBranch | Out-Null
-    Step "Creating worktree $WtPath on branch $Branch off $BaseRef"
-    git -C $RepoRoot worktree add $WtPath -b $Branch $BaseRef
-    if ($LASTEXITCODE -ne 0) {
-        Step "branch may already exist - retrying without -b"
-        git -C $RepoRoot worktree add $WtPath $Branch
-        if ($LASTEXITCODE -ne 0) { Write-Error "git worktree add failed"; exit 1 }
-    }
-}
-
-# --- 3. Copy env files (from config.layout) -----------------------------------
-foreach ($rel in (Get-EnvFileMappings -Config $cfg)) {
-    $src = Join-Path $RepoRoot $rel
-    $dst = Join-Path $WtPath $rel
-    if ((Test-Path $src) -and -not (Test-Path $dst)) {
-        $dstDir = Split-Path $dst -Parent
-        if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
-        Copy-Item $src $dst -Force
-        Step "Copied $rel -> worktree"
-    }
-}
-
-# Copy project .mcp.json (usually untracked, so it is NOT in the worktree checkout)
-# so the worker inherits the project's MCP servers. Command/stdio servers work as-is;
-# HTTP/OAuth servers still need headless auth (e.g. a token), but stdio ones (shadcn,
-# playwright, etc.) become available to the worker immediately.
-$mcpSrc = Join-Path $RepoRoot ".mcp.json"
-$mcpDst = Join-Path $WtPath ".mcp.json"
-if ((Test-Path $mcpSrc) -and -not (Test-Path $mcpDst)) {
-    Copy-Item $mcpSrc $mcpDst -Force
-    Step "Copied .mcp.json -> worktree (project MCP servers)"
-}
-
-# --- 4. Write .claude-bootstrap.md --------------------------------------------
-$bootstrapPath = Join-Path $WtPath ".claude-bootstrap.md"
-Set-Content -Path $bootstrapPath -Value $bootstrapContent -Encoding UTF8
-Step "Wrote .claude-bootstrap.md"
-
-# --- 5. Wire up deps: JUNCTION node_modules from the main checkout ------------
-# Proven pattern: junction, do NOT install. No install wait, no GB-scale dup per
-# worktree. Backend (if any) uses the MAIN venv python by absolute path; there is
-# no per-worktree venv.
-if (-not $SkipDeps) {
-    foreach ($rel in (Get-NodeModuleMappings -Config $cfg)) {
-        $wtNm   = Join-Path $WtPath $rel
-        $mainNm = Join-Path $RepoRoot $rel
-        if (-not (Test-Path $mainNm)) {
-            Step "WARN: main checkout has no '$rel' - install deps in the main repo first, then re-dispatch"
-        } elseif (Test-Path $wtNm) {
-            Step "'$rel' already present in worktree - leaving as-is"
-        } else {
-            $wtNmParent = Split-Path $wtNm -Parent
-            if (-not (Test-Path $wtNmParent)) { New-Item -ItemType Directory -Path $wtNmParent -Force | Out-Null }
-            Step "Junctioning '$rel' from main checkout (no install)"
-            New-Item -ItemType Junction -Path $wtNm -Target $mainNm | Out-Null
-        }
-    }
-}
+# --- 2-5. Provision the worktree (shared with the headless dispatch-codex.ps1) --
+# Create/reuse worktree + copy env files + .mcp.json + write .claude-bootstrap.md +
+# junction node_modules. Single source of truth in Initialize-WorkerWorktree so the
+# interactive and headless paths cannot drift.
+$WtPath = Initialize-WorkerWorktree -Config $cfg -Name $Name -Branch $Branch -BaseRef $BaseRef `
+    -BootstrapContent $bootstrapContent -SkipDeps:$SkipDeps -LogTag "psmux-dispatch"
 
 # --- 6. Ensure psmux session + add window -------------------------------------
 $sessionExists = (psmux ls 2>$null | Select-String -SimpleMatch "$Session")

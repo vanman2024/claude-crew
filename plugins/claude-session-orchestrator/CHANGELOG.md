@@ -3,6 +3,26 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] — 2026-06-13
+
+### Added
+- **Headless `codex exec` build-ahead lane (`dispatch/dispatch-codex.ps1`).** Provisions
+  a worktree then runs Codex to a green PR in the **background** — no psmux pane, no boot
+  handshake (sidesteps the interactive-REPL startup fragility). Uses the verified flags
+  `--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --json`, feeds the
+  brief on stdin, captures the final message via `-o`, and logs the JSONL stream to
+  `<worktreesPath>\.orchestrator\logs\<name>.{jsonl,log}`. Fan out N to fill a verify
+  queue. `-Wait` blocks + prints the result. Codex command resolves via `-CodexCmd`,
+  `config.codexCmdPath`, or `codex` on `PATH`.
+
+### Changed
+- **Worktree provisioning extracted to `Initialize-WorkerWorktree`** (in
+  `lib/_session-config.ps1`) — the single source of truth for worktree create/reuse, env
+  + `.mcp.json` copy, brief write, and `node_modules` junctioning. Both the interactive
+  (`psmux-dispatch.ps1`) and headless (`dispatch-codex.ps1`) dispatchers call it, so they
+  can no longer drift (the `.mcp.json` copy living in only one path was the cautionary
+  case). New `Get-CodexCmd` helper resolves the Codex command.
+
 ## [0.2.2] — 2026-06-13
 
 ### Added

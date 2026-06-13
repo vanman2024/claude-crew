@@ -184,6 +184,31 @@ just a matter of getting its `accept`/`ready` patterns right in `workerCli`. The
 orchestrator and the headless `dispatch-worktree.ps1` remain Claude (they run the
 Claude-only skill / `claude -p`).
 
+#### Headless build-ahead lane (`dispatch-codex.ps1`)
+
+The `codex` *preset* above runs Codex as an **interactive** psmux worker (a pane you
+watch + nudge, with the trust-gate/ready boot handshake). For the **build-ahead** lane
+there is also a **headless** dispatcher that skips the pane and the handshake entirely:
+
+```
+powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/dispatch-codex.ps1" `
+  -Name f042-backend -Task "Build X per specs/...md" -Config "<repo>/.claude/session-plugin.json"
+```
+
+It provisions the worktree with the **same** `Initialize-WorkerWorktree` the interactive
+path uses (worktree + env + `.mcp.json` + brief + junctioned `node_modules`), then runs
+`codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check --json` in
+the **background**, feeding the brief on stdin and logging the JSONL event stream to
+`<worktreesPath>\.orchestrator\logs\<name>.jsonl` (final message → `<name>.last.txt`).
+
+This is the **two-lane rhythm**: a build lane (fan out N headless Codex/Claude workers
+that each run to a green PR, self-testing in their own worktree — zero strain on your
+machine) feeding a verify lane (you pull each green PR into one local `<base>` checkout
+and tier the effort: trivial → quick-merge, risky → full local verify). Resolve the
+Codex command via `-CodexCmd`, `config.codexCmdPath`, or `codex` on `PATH`. Codex must
+be logged in (`codex login`). Add `-Wait` to block and print the result instead of
+launching in the background.
+
 ### Layout: `root`
 
 Single app at the repo root.

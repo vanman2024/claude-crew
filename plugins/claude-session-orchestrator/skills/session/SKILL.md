@@ -101,6 +101,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 | `dispatch/start-orchestrator.ps1` | Spawn the dedicated orchestrator Claude in its own detached worktree + window with the no-auto-merge + batch-scoped brief, then `/loop`. `-IntervalMin 5`. Also spawns the reviewer unless `-NoReviewer`. |
 | `dispatch/start-reviewer.ps1` | Spawn the dedicated **reviewer** Claude (the overseer) in its own home worktree + a `review-checkout` worktree + window. Verifies each green PR (tests + `/code-review`) one at a time, labels `READY-VERIFIED`, builds the ordered queue, then `/loop`. `-IntervalMin 5`. Never merges. |
 | `dispatch/dispatch-worktree.ps1` | Headless one-shot `claude -p` (logs to file) — when you do NOT want an interactive pane |
+| `dispatch/dispatch-codex.ps1` | **Headless `codex exec` build-ahead lane.** Provisions a worktree (shared `Initialize-WorkerWorktree`) then runs Codex to a green PR in the **background**, logging to `.orchestrator/logs/<name>.{jsonl,log}`. Fan out N to fill a verify queue. No psmux pane, no boot handshake. `-Name` + `-Task`/`-Bootstrap`/`-BootstrapFile`; `-Wait` to block. |
 | `teardown/close-worker.ps1` | **Junction-first** post-merge teardown. `-Name <worker>`. |
 | `teardown/cleanup-worktrees.ps1` / `nuke-worktrees.ps1` / `kill-worktree-agents.ps1` | Cleanup helpers |
 | `server/dev-server.ps1` | Start/stop/check a detached dev server. `-Action start\|stop\|status -Dir <worktree>` |

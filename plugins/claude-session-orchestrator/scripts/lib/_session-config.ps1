@@ -170,6 +170,116 @@ function ConvertTo-SessionSlug {
     return $s
 }
 
+# --- Worktree provisioning (shared by ALL dispatchers) ------------------------
+# Create/reuse a worker worktree, copy env files + .mcp.json from the main
+# checkout, write the brief to .claude-bootstrap.md, and JUNCTION node_modules
+# dirs (unless -SkipDeps). Both the interactive dispatcher (psmux-dispatch.ps1)
+# and the headless one (dispatch-codex.ps1) call this so they provision
+# IDENTICALLY and cannot drift (the .mcp.json copy was once added to only one).
+# Returns the absolute worktree path.
+function Initialize-WorkerWorktree {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Branch,
+        [string]$BaseRef,
+        [string]$BootstrapContent,
+        [switch]$SkipDeps,
+        [string]$LogTag = "worktree"
+    )
+
+    $RepoRoot = $Config.repoPath
+    $WtPath   = Join-Path $Config.worktreesPath $Name
+    if (-not $BaseRef) { $BaseRef = "origin/$($Config.defaultBranch)" }
+    function _wtstep($m) { Write-Host "[$LogTag] $m" }
+
+    # 1. Create or reuse the worktree off the base ref.
+    if (Test-Path $WtPath) {
+        _wtstep "Worktree already exists at $WtPath - reusing"
+    } else {
+        _wtstep "Fetching origin/$($Config.defaultBranch)"
+        git -C $RepoRoot fetch origin $Config.defaultBranch | Out-Null
+        _wtstep "Creating worktree $WtPath on branch $Branch off $BaseRef"
+        git -C $RepoRoot worktree add $WtPath -b $Branch $BaseRef
+        if ($LASTEXITCODE -ne 0) {
+            _wtstep "branch may already exist - retrying without -b"
+            git -C $RepoRoot worktree add $WtPath $Branch
+            if ($LASTEXITCODE -ne 0) { throw "git worktree add failed for $WtPath" }
+        }
+    }
+
+    # 2. Copy env files (from config.layout) main -> worktree.
+    foreach ($rel in (Get-EnvFileMappings -Config $Config)) {
+        $src = Join-Path $RepoRoot $rel
+        $dst = Join-Path $WtPath $rel
+        if ((Test-Path $src) -and -not (Test-Path $dst)) {
+            $dstDir = Split-Path $dst -Parent
+            if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+            Copy-Item $src $dst -Force
+            _wtstep "Copied $rel -> worktree"
+        }
+    }
+
+    # 3. Copy project .mcp.json (usually untracked, so NOT in the worktree checkout)
+    # so the worker inherits the project's MCP servers. stdio servers (shadcn,
+    # playwright, ...) work immediately; HTTP/OAuth servers still need headless auth.
+    $mcpSrc = Join-Path $RepoRoot ".mcp.json"
+    $mcpDst = Join-Path $WtPath ".mcp.json"
+    if ((Test-Path $mcpSrc) -and -not (Test-Path $mcpDst)) {
+        Copy-Item $mcpSrc $mcpDst -Force
+        _wtstep "Copied .mcp.json -> worktree (project MCP servers)"
+    }
+
+    # 4. Write the brief to .claude-bootstrap.md (the ONLY file the worker is told to read).
+    if ($BootstrapContent) {
+        $bootstrapPath = Join-Path $WtPath ".claude-bootstrap.md"
+        Set-Content -Path $bootstrapPath -Value $BootstrapContent -Encoding UTF8
+        _wtstep "Wrote .claude-bootstrap.md"
+    }
+
+    # 5. JUNCTION node_modules from the main checkout (proven: junction, do NOT install).
+    if (-not $SkipDeps) {
+        foreach ($rel in (Get-NodeModuleMappings -Config $Config)) {
+            $wtNm   = Join-Path $WtPath $rel
+            $mainNm = Join-Path $RepoRoot $rel
+            if (-not (Test-Path $mainNm)) {
+                _wtstep "WARN: main checkout has no '$rel' - install deps in the main repo first, then re-dispatch"
+            } elseif (Test-Path $wtNm) {
+                _wtstep "'$rel' already present in worktree - leaving as-is"
+            } else {
+                $wtNmParent = Split-Path $wtNm -Parent
+                if (-not (Test-Path $wtNmParent)) { New-Item -ItemType Directory -Path $wtNmParent -Force | Out-Null }
+                _wtstep "Junctioning '$rel' from main checkout (no install)"
+                New-Item -ItemType Junction -Path $wtNm -Target $mainNm | Out-Null
+            }
+        }
+    }
+
+    return $WtPath
+}
+
+# Resolve the Codex CLI command for headless dispatch (dispatch-codex.ps1).
+# Order: explicit -CodexCmd, then config.codexCmdPath, then PATH (codex.cmd / codex).
+# config.workerCmdPath is NOT used as a fallback: in a mixed session it points at
+# the interactive worker (often claude.cmd), not Codex.
+function Get-CodexCmd {
+    param($Config, [string]$CodexCmd)
+
+    if ($CodexCmd) {
+        if (Test-Path $CodexCmd) { return $CodexCmd }
+        throw "Codex CLI not found at -CodexCmd path: $CodexCmd"
+    }
+    if ($Config -and ($Config.PSObject.Properties.Name -contains 'codexCmdPath') -and $Config.codexCmdPath) {
+        if (Test-Path $Config.codexCmdPath) { return $Config.codexCmdPath }
+        throw "config.codexCmdPath does not exist: $($Config.codexCmdPath)"
+    }
+    foreach ($name in @('codex.cmd', 'codex')) {
+        $c = Get-Command $name -ErrorAction SilentlyContinue
+        if ($c) { return $c.Source }
+    }
+    throw "Codex CLI not found. Pass -CodexCmd <path>, set config.codexCmdPath, or put 'codex' on PATH (npm i -g @openai/codex)."
+}
+
 # --- Worker-CLI profiles ------------------------------------------------------
 # The worker dispatch is data-driven: a profile tells psmux-dispatch how to launch
 # the agent CLI in the pane and how to detect that it is ready.
