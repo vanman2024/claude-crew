@@ -198,12 +198,15 @@ function Initialize-WorkerWorktree {
         _wtstep "Worktree already exists at $WtPath - reusing"
     } else {
         _wtstep "Fetching origin/$($Config.defaultBranch)"
-        git -C $RepoRoot fetch origin $Config.defaultBranch | Out-Null
+        git -C $RepoRoot fetch origin $Config.defaultBranch *>&1 | Out-Null
         _wtstep "Creating worktree $WtPath on branch $Branch off $BaseRef"
-        git -C $RepoRoot worktree add $WtPath -b $Branch $BaseRef
+        # NB: pipe git's output to Out-Null. Native stdout would otherwise leak into
+        # this function's return pipeline and $WtPath would come back as an array
+        # (git chatter + the path), poisoning every caller (e.g. codex ArgumentList).
+        git -C $RepoRoot worktree add $WtPath -b $Branch $BaseRef *>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             _wtstep "branch may already exist - retrying without -b"
-            git -C $RepoRoot worktree add $WtPath $Branch
+            git -C $RepoRoot worktree add $WtPath $Branch *>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "git worktree add failed for $WtPath" }
         }
     }

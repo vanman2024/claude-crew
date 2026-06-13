@@ -45,6 +45,13 @@ param(
     # Skip dependency wiring (faster when reusing a warm worktree)
     [switch]$SkipDeps,
 
+    # Per-worker CLI override (else config.workerCli). E.g. -WorkerCliName codex runs a
+    # Codex worker in THIS psmux window while other windows in the session stay Claude.
+    [string]$WorkerCliName,
+
+    # Override the launch command (else the preset cmd; for codex, auto-resolves codex.cmd).
+    [string]$WorkerCmdOverride,
+
     # Seconds budget for the boot handshake before sending the brief anyway
     [int]$ClaudeBootWaitSec = 12
 )
@@ -60,7 +67,16 @@ $RepoRoot  = $cfg.repoPath
 $WtBase    = $cfg.worktreesPath
 $WtPath    = Join-Path $WtBase $Name
 # The worker CLI launch + boot handshake are data-driven (see Get-WorkerCliProfile).
+# -WorkerCliName overrides config.workerCli for THIS worker so one session can mix
+# Claude + Codex windows. For codex, the preset's cmd falls back to workerCmdPath
+# (often claude.cmd) which is wrong, so resolve the real codex command.
+if ($WorkerCliName) { $cfg | Add-Member -NotePropertyName workerCli -NotePropertyValue $WorkerCliName -Force }
 $WorkerCli = Get-WorkerCliProfile -Config $cfg
+if ($WorkerCmdOverride) {
+    $WorkerCli.cmd = $WorkerCmdOverride
+} elseif ($WorkerCli.name -eq 'codex' -and $WorkerCli.cmd -eq $cfg.workerCmdPath) {
+    $WorkerCli.cmd = Get-CodexCmd -Config $cfg
+}
 $WorkerCmd = $WorkerCli.cmd
 if (-not $Session) { $Session = $cfg.psmuxSession }
 if (-not $BaseRef) { $BaseRef = "origin/$($cfg.defaultBranch)" }
