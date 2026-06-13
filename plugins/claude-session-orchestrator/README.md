@@ -126,12 +126,12 @@ The launch and the boot handshake are **data-driven** by an optional `workerCli`
 profile, so you can run a non-Claude worker without editing any script. It can be:
 
 - **omitted** → the `claude` preset (today's behavior), or
-- **a preset name string** → `"claude"` or `"generic"`, or
+- **a preset name string** → `"claude"`, `"codex"`, or `"generic"`, or
 - **an object** that extends a preset / fully specifies the launch:
 
 | Field | Meaning |
 |-------|---------|
-| `preset` | base preset to extend (`claude` / `generic`) |
+| `preset` | base preset to extend (`claude` / `codex` / `generic`) |
 | `cmd` | launch command (defaults to `workerCmdPath`) |
 | `args` | launch args, e.g. `["--dangerously-skip-permissions"]` |
 | `clearEnv` | env vars to null in the pane before launch, e.g. `["CLAUDECODE"]` |
@@ -147,12 +147,21 @@ profile, so you can run a non-Claude worker without editing any script. It can b
 - **`claude`** (default, verified) — `args: --dangerously-skip-permissions`, clears
   `CLAUDECODE`/`CLAUDE_CODE_ENTRYPOINT`, accepts the bypass screen with `2`, waits for
   the `bypass permissions on` footer.
+- **`codex`** (verified) — the OpenAI **Codex** CLI. `args:
+  --dangerously-bypass-approvals-and-sandbox --no-alt-screen` (the first is Codex's
+  analog of `--dangerously-skip-permissions`; `--no-alt-screen` is **required** so the
+  TUI renders inline — alt-screen mode breaks `capture-pane` scrollback in psmux).
+  Answers Codex's per-directory *"Do you trust the contents of this directory?"* gate
+  with `1` (Yes, continue), and treats the REPL as ready when the `permissions: YOLO
+  mode` / `>_ OpenAI Codex` header appears. Set `workerCmdPath` to your `codex.cmd`
+  (e.g. `C:\Users\<you>\AppData\Roaming\npm\codex.cmd`) and `"workerCli": "codex"`.
+  Codex must already be logged in (`codex login`).
 - **`generic`** — no args, no env clearing, **no accept handshake**; just a fixed
   `bootWaitSec` wait then sends the brief. Good for a CLI that boots straight to a
   prompt.
 
-**Other CLIs (Codex / Gemini / Qwen / …):** we deliberately do **not** ship presets
-with guessed prompt strings for CLIs we can't verify. Wire your CLI with an object,
+**Other CLIs (Gemini / Qwen / …):** we deliberately do **not** ship presets with
+guessed prompt strings for CLIs we can't verify. Wire your CLI with an object,
 supplying its *real* startup patterns. Example shape (verify the actual strings for
 your CLI — these are placeholders):
 
@@ -168,11 +177,12 @@ your CLI — these are placeholders):
 }
 ```
 
-**Honest status:** the **`claude` preset is the only verified one** (it's what the
-live e2e proved). The scaffold (worktree + psmux + brief + orchestrator pane I/O) is
-fully agent-agnostic; getting a *new* CLI to boot cleanly is just a matter of getting
-its `accept`/`ready` patterns right in `workerCli`. The orchestrator and the headless
-`dispatch-worktree.ps1` remain Claude (they run the Claude-only skill / `claude -p`).
+**Honest status:** the **`claude` and `codex` presets are verified** (each captured
+from a live boot in a psmux pane). The scaffold (worktree + psmux + brief +
+orchestrator pane I/O) is fully agent-agnostic; getting a *new* CLI to boot cleanly is
+just a matter of getting its `accept`/`ready` patterns right in `workerCli`. The
+orchestrator and the headless `dispatch-worktree.ps1` remain Claude (they run the
+Claude-only skill / `claude -p`).
 
 ### Layout: `root`
 

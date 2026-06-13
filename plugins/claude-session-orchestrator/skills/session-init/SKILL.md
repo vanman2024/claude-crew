@@ -32,7 +32,9 @@ Derive:
 - `defaultBranch` = origin's default branch if detected, else the current branch, else `main`.
 - `githubRepo` = from `gh` if available, else ask.
 - `workerCmdPath` = the `.cmd` from `where.exe claude`; if only a non-.cmd path is found, prefer `C:\Users\<you>\AppData\Roaming\npm\claude.cmd`. Confirm it exists.
-- `workerCli` (optional) = which agent CLI the workers run. **Default: omit it (= the `claude` preset).** Only ask about this if the user wants non-Claude workers (Codex/Gemini/Qwen). If so, set `workerCmdPath` to that CLI and give `workerCli` an object with its real launch args + accept/ready patterns (see the "Worker CLI" section of the plugin README). Do NOT invent prompt strings for a CLI you can't verify — ask the user for them or start from the `generic` preset.
+- `workerCli` (optional) = which agent CLI the workers run. **Default: omit it (= the `claude` preset).** Only ask about this if the user wants non-Claude workers.
+  - **Codex** is a verified preset: set `"workerCli": "codex"` and point `workerCmdPath` at the user's `codex.cmd` (e.g. `C:\Users\<you>\AppData\Roaming\npm\codex.cmd` — confirm via `where.exe codex.cmd`). It launches `--dangerously-bypass-approvals-and-sandbox --no-alt-screen`, auto-answers the trust-directory gate, and waits for the YOLO-mode header. The user must already be logged in (`codex login`).
+  - **Other CLIs (Gemini/Qwen/…):** give `workerCli` an object with its real launch args + accept/ready patterns (see the "Worker CLI" section of the plugin README). Do NOT invent prompt strings for a CLI you can't verify — ask the user for them or start from the `generic` preset.
 
 ## Step 2 — Choose the layout (ask)
 

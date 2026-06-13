@@ -3,6 +3,21 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] — 2026-06-13
+
+### Added
+- **Verified `codex` worker-CLI preset.** Captured from a live boot of the OpenAI
+  Codex CLI in a psmux pane: launches `--dangerously-bypass-approvals-and-sandbox
+  --no-alt-screen` (`--no-alt-screen` is required so the inline TUI is visible to
+  `capture-pane`), auto-answers Codex's per-directory trust gate with `1`, and detects
+  readiness from the `permissions: YOLO mode` / `>_ OpenAI Codex` header. Use with
+  `"workerCli": "codex"` + `workerCmdPath` → `codex.cmd`. README, session-init, and
+  Pester coverage updated.
+- **Project `.mcp.json` passthrough to worktrees.** `psmux-dispatch.ps1` now copies the
+  project's (usually untracked) `.mcp.json` into each fresh worktree so workers inherit
+  the project's MCP servers. stdio servers (shadcn, playwright, …) work immediately;
+  HTTP/OAuth servers still need headless auth.
+
 ## [0.2.0] — 2026-05-30
 
 ### Added

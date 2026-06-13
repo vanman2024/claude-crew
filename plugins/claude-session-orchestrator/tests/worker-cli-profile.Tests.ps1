@@ -44,6 +44,18 @@ Describe "Get-WorkerCliProfile" {
             (Get-WorkerCliProfile -Config $cfg).name | Should -Be 'claude'
         }
 
+        It "codex preset has the verified launch args + trust/ready patterns, cmd falls back" {
+            $cfg = New-Cfg; $cfg | Add-Member workerCli 'codex' -Force
+            $p = Get-WorkerCliProfile -Config $cfg
+            $p.name | Should -Be 'codex'
+            $p.cmd  | Should -Be $cfg.workerCmdPath
+            $p.args | Should -Contain '--dangerously-bypass-approvals-and-sandbox'
+            $p.args | Should -Contain '--no-alt-screen'
+            $p.acceptMatchAny | Should -Contain 'Yes,continue'
+            $p.acceptSend | Should -Be '1'
+            $p.readyMatchAny | Should -Contain 'permissions:YOLOmode'
+        }
+
         It "generic has no args/env/patterns and a fixed bootWait, cmd falls back" {
             $cfg = New-Cfg; $cfg | Add-Member workerCli 'generic' -Force
             $p = Get-WorkerCliProfile -Config $cfg

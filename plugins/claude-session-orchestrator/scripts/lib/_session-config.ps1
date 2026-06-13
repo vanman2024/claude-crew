@@ -184,9 +184,9 @@ function ConvertTo-SessionSlug {
 #   readyMatchAny  : substrings (whitespace-removed) that signal the REPL is ready
 #   bootWaitSec    : fixed wait when there are NO accept/ready patterns
 #
-# Only 'claude' is verified (proven in the live e2e). 'generic' does a fixed-wait
-# launch with no accept handshake. For other CLIs (Codex/Gemini/Qwen), supply a
-# custom object in config.workerCli with that CLI's REAL patterns — we do not ship
+# 'claude' and 'codex' are verified (captured from a live boot). 'generic' does a
+# fixed-wait launch with no accept handshake. For other CLIs (Gemini/Qwen/…), supply
+# a custom object in config.workerCli with that CLI's REAL patterns — we do not ship
 # unverified prompt strings.
 function Get-WorkerCliPreset {
     param([string]$Name)
@@ -198,6 +198,21 @@ function Get-WorkerCliPreset {
                 clearEnv = @('CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT')
                 acceptMatchAny = @('Yes,Iaccept', 'No,exit'); acceptSend = '2'
                 readyMatchAny = @('bypasspermissionson'); bootWaitSec = 12
+            }
+        }
+        'codex' {
+            # OpenAI Codex CLI. --dangerously-bypass-approvals-and-sandbox is the
+            # analog of Claude's --dangerously-skip-permissions; --no-alt-screen is
+            # REQUIRED so the TUI renders inline (alt-screen mode breaks capture-pane
+            # scrollback in psmux/tmux). Each fresh worktree is a new path, so Codex
+            # shows its per-directory "trust this directory" gate — answered with '1'
+            # (Yes, continue). Ready when the REPL header / YOLO-mode line appears.
+            [pscustomobject]@{
+                name = 'codex'; cmd = $null
+                args = @('--dangerously-bypass-approvals-and-sandbox', '--no-alt-screen')
+                clearEnv = @()
+                acceptMatchAny = @('Doyoutrustthecontents', 'Yes,continue'); acceptSend = '1'
+                readyMatchAny = @('permissions:YOLOmode', '>_OpenAICodex'); bootWaitSec = 15
             }
         }
         'generic' {
@@ -214,7 +229,7 @@ function Get-WorkerCliPreset {
 
 # Resolve the effective worker-CLI profile from config.workerCli, which may be:
 #   - absent          -> 'claude' preset
-#   - a string        -> that preset name
+#   - a string        -> that preset name ('claude' | 'codex' | 'generic')
 #   - an object       -> { preset?, cmd?, args?, clearEnv?, bootWaitSec?,
 #                          accept{matchAny?,send?}, ready{matchAny?} } extending a preset
 # cmd falls back to config.workerCmdPath.
@@ -237,7 +252,7 @@ function Get-WorkerCliProfile {
 
     $profile = Get-WorkerCliPreset $presetName
     if ($null -eq $profile) {
-        throw "Unknown workerCli preset '$presetName' (known: claude, generic). For another CLI, use a workerCli OBJECT with explicit fields (cmd/args/clearEnv/accept/ready/bootWaitSec)."
+        throw "Unknown workerCli preset '$presetName' (known: claude, codex, generic). For another CLI, use a workerCli OBJECT with explicit fields (cmd/args/clearEnv/accept/ready/bootWaitSec)."
     }
 
     if ($override) {

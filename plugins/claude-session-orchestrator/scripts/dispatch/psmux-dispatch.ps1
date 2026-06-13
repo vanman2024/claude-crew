@@ -118,6 +118,17 @@ foreach ($rel in (Get-EnvFileMappings -Config $cfg)) {
     }
 }
 
+# Copy project .mcp.json (usually untracked, so it is NOT in the worktree checkout)
+# so the worker inherits the project's MCP servers. Command/stdio servers work as-is;
+# HTTP/OAuth servers still need headless auth (e.g. a token), but stdio ones (shadcn,
+# playwright, etc.) become available to the worker immediately.
+$mcpSrc = Join-Path $RepoRoot ".mcp.json"
+$mcpDst = Join-Path $WtPath ".mcp.json"
+if ((Test-Path $mcpSrc) -and -not (Test-Path $mcpDst)) {
+    Copy-Item $mcpSrc $mcpDst -Force
+    Step "Copied .mcp.json -> worktree (project MCP servers)"
+}
+
 # --- 4. Write .claude-bootstrap.md --------------------------------------------
 $bootstrapPath = Join-Path $WtPath ".claude-bootstrap.md"
 Set-Content -Path $bootstrapPath -Value $bootstrapContent -Encoding UTF8

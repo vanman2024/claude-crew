@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Claude Code plugins for orchestrating crews of parallel Claude workers.",
-    "version": "0.2.1"
+    "version": "0.2.2"
   },
   "plugins": [
     {
