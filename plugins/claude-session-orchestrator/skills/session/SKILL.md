@@ -106,6 +106,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 | `teardown/cleanup-worktrees.ps1` / `nuke-worktrees.ps1` / `kill-worktree-agents.ps1` | Cleanup helpers |
 | `server/dev-server.ps1` | Start/stop/check a detached dev server. `-Action start\|stop\|status -Dir <worktree>` |
 | `status/check-worktree-health.ps1` | Health (git, deps, env). `-Name <n>\|-All [-Json]` |
+| `status/check-headless-workers.ps1` | **Monitor the headless build-ahead lane.** Reports each `dispatch-codex.ps1` worker's state (RUNNING/COMPLETE/BLOCKED/EXITED) + PR URL from its meta + logs (they are NOT psmux windows). `-Config <cfg> [-Json]`. |
 | `status/install-worktree-hooks.sh` | Install per-worktree status hooks (optional; psmux capture-pane is the primary channel) |
 | `util/kill-port.ps1` / `force-remove-dir.ps1` | Low-level helpers (no config) |
 | `lib/_session-config.ps1` / `_session-brief.ps1` | Shared loader + brief generator (dot-sourced; never invoked directly) |

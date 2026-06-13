@@ -14,6 +14,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `<worktreesPath>\.orchestrator\logs\<name>.{jsonl,log}`. Fan out N to fill a verify
   queue. `-Wait` blocks + prints the result. Codex command resolves via `-CodexCmd`,
   `config.codexCmdPath`, or `codex` on `PATH`.
+- **Headless-worker monitor (`status/check-headless-workers.ps1`).** Headless Codex
+  workers are background processes, not psmux windows, so `capture-pane` can't see them.
+  This reads the per-worker meta files dispatch-codex drops and reports each one's state
+  (RUNNING/COMPLETE/BLOCKED/EXITED) + PR URL, so `orchestrate poll` folds them into its
+  dashboard and self-terminate check. `-Json` for machine consumption. dispatch-codex now
+  writes `<name>.meta.json` (pid + log paths) for it.
 
 ### Changed
 - **Worktree provisioning extracted to `Initialize-WorkerWorktree`** (in

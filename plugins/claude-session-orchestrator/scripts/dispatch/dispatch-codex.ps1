@@ -144,6 +144,21 @@ if ($Wait) { $spArgs.Wait = $true }
 
 $proc = Start-Process @spArgs
 
+# Drop a meta file so the headless-worker monitor (status/check-headless-workers.ps1)
+# can find this run, check liveness by PID, and locate its stream/result logs.
+$metaFile = Join-Path $logDir "$Name.meta.json"
+@{
+    name      = $Name
+    cli       = "codex"
+    pid       = $proc.Id
+    branch    = $Branch
+    worktree  = $WtPath
+    stream    = $streamFile
+    last      = $lastFile
+    log       = $logFile
+    startedAt = (Get-Date -Format o)
+} | ConvertTo-Json | Set-Content -Path $metaFile -Encoding UTF8
+
 if ($Wait) {
     $exitCode = $proc.ExitCode
     Write-Host "EXIT_CODE=$exitCode"

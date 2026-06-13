@@ -150,6 +150,17 @@ Everything else is out of scope for this poll.
    psmux list-windows -t <sess>
    ```
    Skip the infra windows: `orchestrator` and `reviewer`.
+
+   **Headless build-ahead workers** (dispatched via `dispatch-codex.ps1`) are background
+   processes, NOT psmux windows — `capture-pane` cannot see them. Enumerate them
+   separately and fold them into the report + the self-terminate check:
+   ```
+   powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-headless-workers.ps1" -Config "<repo>/.claude/session-plugin.json" -Json
+   ```
+   Each row reports `State` (RUNNING/COMPLETE/BLOCKED/EXITED) + `PR`. You cannot nudge a
+   headless worker (no pane); if one is `BLOCKED` or `EXITED`, report it and let the user
+   decide (re-dispatch / inspect its `Log`). A `COMPLETE` row with a PR feeds the same
+   "READY FOR USER REVIEW" path as a psmux worker's PR.
 2. For each worker window:
    ```
    psmux capture-pane -t <sess>:<name> -p
@@ -211,8 +222,10 @@ alive; just the merged window gets killed.
 
 ### Phase 6: Self-terminate check (Contract 4)
 
-If there are **no live worker windows AND no open batch PRs**, print a final summary, exit the
-`/loop`, and exit Claude. Otherwise continue.
+If there are **no live worker windows, no RUNNING headless workers (check-headless-workers.ps1),
+AND no open batch PRs**, print a final summary, exit the `/loop`, and exit Claude. Otherwise
+continue. (Headless workers count as "live" while RUNNING — do not self-terminate out from under
+a Codex worker that is still building.)
 
 ### Phase 7: Report
 

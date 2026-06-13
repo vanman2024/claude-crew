@@ -68,6 +68,37 @@ Describe "dispatch-codex.ps1 (headless build-ahead lane)" {
     }
 }
 
+Describe "check-headless-workers.ps1 (headless monitor) classifies meta files" {
+    BeforeAll {
+        $script:MonitorScript = Join-Path $script:ScriptsDir "status\check-headless-workers.ps1"
+        $script:TmpLogs = Join-Path ([IO.Path]::GetTempPath()) ("chw-" + [Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $script:TmpLogs -Force | Out-Null
+
+        # COMPLETE worker: dead pid, last.txt with the sentinel + a PR url.
+        $doneLast = Join-Path $script:TmpLogs "done.last.txt"
+        Set-Content $doneLast "WORKTREE_STATUS: COMPLETE`nPR: https://github.com/acme/repo/pull/42`n" -Encoding UTF8
+        @{ name='done'; cli='codex'; pid=999999999; branch='feature/done'; last=$doneLast; stream=''; log='' } |
+            ConvertTo-Json | Set-Content (Join-Path $script:TmpLogs "done.meta.json") -Encoding UTF8
+
+        # EXITED worker: dead pid, no last.txt.
+        @{ name='gone'; cli='codex'; pid=999999998; branch='feature/gone'; last=(Join-Path $script:TmpLogs 'gone.last.txt'); stream=''; log='' } |
+            ConvertTo-Json | Set-Content (Join-Path $script:TmpLogs "gone.meta.json") -Encoding UTF8
+    }
+    AfterAll {
+        if (Test-Path $script:TmpLogs) { Remove-Item $script:TmpLogs -Recurse -Force }
+    }
+
+    It "exists" { Test-Path $script:MonitorScript | Should -BeTrue }
+
+    It "reports COMPLETE + the PR url, and EXITED for a dead worker with no result" {
+        $json = & $script:MonitorScript -LogsDir $script:TmpLogs -Json
+        $rows = $json | ConvertFrom-Json
+        ($rows | Where-Object Name -eq 'done').State | Should -Be 'COMPLETE'
+        ($rows | Where-Object Name -eq 'done').PR    | Should -Be 'https://github.com/acme/repo/pull/42'
+        ($rows | Where-Object Name -eq 'gone').State | Should -Be 'EXITED'
+    }
+}
+
 Describe "Shared worktree provisioning" {
     It "both dispatchers call Initialize-WorkerWorktree" {
         (Get-Content $script:PsmuxScript -Raw) | Should -Match 'Initialize-WorkerWorktree'
