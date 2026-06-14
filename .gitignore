@@ -10,3 +10,6 @@ Thumbs.db
 # Pester / test output
 testResults*.xml
 coverage*.xml
+
+# graphify generated knowledge-graph artifacts (regenerated on demand)
+graphify-out/
