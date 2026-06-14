@@ -3,6 +3,22 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.7] — 2026-06-13
+
+### Changed
+- **Skill docs aligned with the new dispatch + review/merge workflow** (so launching the
+  skill actually uses it, not just the scripts):
+  - **Review routing** — `SKILL.md` Merge protocol + Critical Rule 11, `commands-orchestrate.md`
+    Phase 5, `commands-review.md` Phase 5: a **frontend-only** PR is reviewed on the **Vercel
+    preview**; a **backend / full-stack** PR is **checked out locally** so the user can run it on
+    3000/8000 (a preview can't exercise backend). Classify by `gh pr diff --name-only` vs team
+    `ownsPaths`.
+  - **No auto-teardown** (Critical Rule 12, `commands-orchestrate.md` Contract 3 / Phase 5):
+    workers stay alive after merge for iteration; `close-worker.ps1` runs only when the user says a
+    worker is done.
+  - **Dispatch capabilities documented** (Critical Rule 13 + scripts table): `-Mode
+    feature|iteration`, `-Spec <path>`, `-WorkerCliName codex`, and scoped-unit-tests-not-full-suite.
+
 ## [0.2.6] — 2026-06-13
 
 ### Changed

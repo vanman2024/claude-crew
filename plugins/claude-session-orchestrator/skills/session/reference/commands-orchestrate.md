@@ -32,10 +32,12 @@ sub-command below is written to honor them. Read them first.
    the user's own work, and any branch without a live worktree under `<wt>/` are NOT in the
    batch. Do NOT report them, do NOT consider merging them, do NOT include them in status.
 
-3. **Cleanup only after the USER merges.** A worker worktree is torn down ONLY after its PR is
-   observed merged (by the user). Teardown goes through `teardown/close-worker.ps1` (junction-first:
-   detaches the node_modules junction(s) BEFORE `git worktree remove` so the main checkout's
-   node_modules is never followed and deleted). Never tear down a worktree with an open PR.
+3. **Do NOT auto-tear-down. Keep workers alive.** A merged PR does NOT make a worker disposable —
+   the user keeps it alive to iterate (tell the worker to fix → push → re-review, or work the
+   checked-out branch) or to give it more tasks, and the work is already on the remote regardless.
+   Tear down via `teardown/close-worker.ps1` (junction-first: detaches the node_modules junction(s)
+   BEFORE `git worktree remove`) **ONLY** when the USER explicitly says that worker is done. Never
+   auto-clean after a merge; never tear down a worktree with an open PR.
 
 4. **Self-terminate.** End the loop when there are **no live worker windows AND no open PRs from
    this batch**. Print a summary, exit the loop, exit Claude.
@@ -207,18 +209,23 @@ For batch PRs, optionally verify the agent built what the brief asked:
    ```
 3. Flag missing deliverables in the report (and optionally nudge the worker if it's still live).
 
-### Phase 5: Cleanup (only after the USER merges — Contract 3)
+### Phase 5: Review routing — tell the user HOW to review each green PR (Contracts 3 + 11)
 
-For each batch worktree whose PR is **observed merged into `<base>`** (the user merged it), and
-whose worker window still exists, tear it down with the junction-first script:
+Do **NOT** auto-tear-down merged workers — keep them alive (Contract 3). Instead, for each green
+batch PR, classify it by lane and tell the user how to review it:
 ```bash
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name "<name>" -Config "<repo>/.claude/session-plugin.json"
+gh pr diff <n> --name-only          # compare paths against config.teams ownsPaths
 ```
-`close-worker.ps1` detaches the node_modules junction(s) FIRST, kills the psmux window, then runs
-`git worktree remove --force` + `git worktree prune`. **Never** raw `git worktree remove` a worktree
-whose junctions are still attached (it follows the junction into the main checkout's node_modules).
-**Only** clean worktrees whose PR is merged — never one with an open PR. The `<sess>` session stays
-alive; just the merged window gets killed.
+- **Frontend-only** (every changed path in the frontend lane) → report "review on the Vercel
+  preview" with the PR/preview URL. No local checkout.
+- **Backend / full-stack** (any backend-lane path) → report it **needs a local checkout** so the
+  user can run it on 3000/8000 (a preview can't exercise backend). Offer to fetch + check the branch
+  out into the `review-checkout` worktree and `server-start` it.
+
+Teardown is **user-driven only**: run `close-worker.ps1` (junction-first — detaches the
+node_modules junction(s) BEFORE `git worktree remove`, kills the window, prunes) **only** when the
+user explicitly says a worker is done. Never raw `git worktree remove` a worktree whose junctions are
+still attached. Keep workers alive after merge for iteration.
 
 ### Phase 6: Self-terminate check (Contract 4)
 

@@ -62,13 +62,27 @@ psmux SESSION (= config.psmuxSession) — persistent, survives terminal closing
 
 ## Merge protocol (when the user authorizes a merge)
 
-The orchestrator NEVER merges (Critical Rule 8). When the user says "merge it", the MAIN session does it — and **the order matters, based on which files each PR touched:**
+The orchestrator NEVER merges (Critical Rule 8). When the user says "merge it", the MAIN session does it. Two things gate every merge: **how the user reviews the PR**, and **the merge order** (based on which files each PR touched). **Never auto-merge and never merge before the user has reviewed.**
+
+### Review routing — how the user checks each PR (do this FIRST)
+
+Classify the PR by lane: `gh pr diff <n> --name-only`, compared against the `config.teams` `ownsPaths` (frontend lane vs backend lane).
+
+- **Frontend-only PR** (every changed path is in the frontend lane) → the user reviews it on the **Vercel preview** deployment. Do NOT check it out locally — just report the preview URL and let the user look.
+- **Backend or full-stack PR** (any path in the backend lane) → **check the branch out locally** so the user can RUN it on their local env (3000/8000) and see it actually work — a Vercel preview cannot exercise backend behavior. Fetch + check out the branch into a local review checkout (e.g. `git -C <repo> fetch origin <branch>` into the `review-checkout` worktree) and `server-start` it, then hand it to the user.
+
+Surface the routing per PR. The user reviews (preview or local run), iterates if needed, then says "merge it".
+
+### Merge order (based on file overlap)
 
 1. **Find overlap first:** `gh pr view <n> --json files --jq '.files[].path'` for every candidate PR. Any path touched by >1 PR means those PRs must be sequenced.
 2. **Disjoint PRs** (no shared files) → merge in any order, freely.
 3. **Overlapping PRs** → one at a time: merge the first → rebase the next onto updated `<base>` → resolve the shared-file conflicts → **re-verify** → merge → repeat. Each merge can flip another PR's `mergeable` flag to CONFLICTING, so re-check after every merge.
 4. **Squash-merge** each (one clean commit per feature; easy single-feature revert).
-5. **Verify BEFORE merge.** A green PR means *automated tests pass* (worker's tests + CI) — NOT that the feature behaves correctly. Checkout the branch **in its own worktree** (never the dirty main repo), smoke-test the real behavior, then merge. Re-verify overlapping PRs after each rebase, because the combination changed.
+
+### After a merge — do NOT tear down the worker
+
+Leave the worker's worktree + psmux window **running**. The user keeps workers alive to iterate (tell the worker to fix + push, then re-review the preview / re-check the local branch) or to feed them more tasks. The work is already on the remote, so there is no rush to close anything. Tear down (junction-first via `close-worker.ps1`) **only** when the user explicitly says that worker is done. Never auto-clean after a merge.
 
 ## Quick Reference
 
@@ -96,7 +110,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 
 | Script (path under `scripts/`) | Purpose |
 |--------|---------|
-| `dispatch/psmux-dispatch.ps1` | **Primary dispatch.** worktree + env copy + node_modules junction + psmux window + Claude launch (boot handshake) + bootstrap. `-Name` + one of `-Task` / `-Bootstrap` / `-BootstrapFile`. Auto-injects the project's agent-team rules when given `-Task`. |
+| `dispatch/psmux-dispatch.ps1` | **Primary dispatch.** worktree + env copy + node_modules junction + psmux window + worker launch (boot handshake) + bootstrap. `-Name` + one of `-Task` / `-Bootstrap` / `-BootstrapFile`. Brief flags (when `-Task`): `-Mode feature\|iteration`, `-Spec <repo-rel path>`, `-IssueNumber <n>`. `-WorkerCliName codex` (+ optional `-WorkerCmdOverride`) runs a **Codex** worker in this window instead of Claude — one session can mix both. |
 | `dispatch/psmux-dispatch-issues.ps1` | **Bulk dispatch.** `-Issues 510,511,512` (or positional). Fetches each issue, builds a brief, dispatches per issue. |
 | `dispatch/start-orchestrator.ps1` | Spawn the dedicated orchestrator Claude in its own detached worktree + window with the no-auto-merge + batch-scoped brief, then `/loop`. `-IntervalMin 5`. Also spawns the reviewer unless `-NoReviewer`. |
 | `dispatch/start-reviewer.ps1` | Spawn the dedicated **reviewer** Claude (the overseer) in its own home worktree + a `review-checkout` worktree + window. Verifies each green PR (tests + `/code-review`) one at a time, labels `READY-VERIFIED`, builds the ordered queue, then `/loop`. `-IntervalMin 5`. Never merges. |
@@ -123,6 +137,9 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 8. **No auto-merge.** The orchestrator never runs `gh pr merge`. Merges are user-authorized ("merge it").
 9. **`/loop` is the cron.** Never use Windows scheduled tasks or PowerShell `Start-Sleep` polling loops. The PS scripts' job ends after launching Claude.
 10. **Reviewer verifies in its OWN checkout worktree, never the main repo.** The reviewer (overseer) checks out PR branches only in `<wt>/review-checkout`, runs tests + `/code-review` there, labels `READY-VERIFIED`, and produces an ordered merge queue. It NEVER merges (Rule 8) and NEVER touches `<repo>`'s working state (like the orchestrator). One PR at a time, sequenced by file overlap.
+11. **Review routing (how the user sees a PR).** A **frontend-only** PR is reviewed on the **Vercel preview** (report the URL, no local checkout). A **backend / full-stack** PR must be **checked out locally** so the user can run it on 3000/8000 — a preview cannot exercise backend behavior. Classify with `gh pr diff <n> --name-only` vs the team `ownsPaths`. See the Merge protocol.
+12. **Do NOT auto-tear-down workers.** A merged PR does NOT make a worker disposable — keep its worktree + psmux window alive so the user can iterate (tell the worker to fix → push → re-review, or work the checked-out branch) or assign more tasks. Tear down (junction-first, `close-worker.ps1`) ONLY when the user explicitly says that worker is done. The work is on the remote regardless, so there's no rush.
+13. **Worker briefs are data-driven + CLI-aware.** Dispatch with `-Mode feature|iteration` and `-Spec <path>` so the brief leads with the work type + the authoritative spec; `-WorkerCliName codex` runs a Codex worker (it gets file-lanes but not Claude's `subagent_type` agents). Workers run **scoped unit tests + typecheck**, never the full suite (CI runs that). All of this lives in `New-WorkerBrief` — the dispatchers just pass it through.
 
 ## Detailed References
 

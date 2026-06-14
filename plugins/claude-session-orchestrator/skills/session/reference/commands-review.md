@@ -136,11 +136,17 @@ checked-out PR head (reviews its changes vs `<base>`).
   ```
   Do not re-verify until a new commit is pushed.
 
-### Phase 5 — Report the queue
+### Phase 5 — Report the queue (with review routing)
+
+For each verified PR, classify **how the user reviews it**: `gh pr diff <n> --name-only` vs the team
+`ownsPaths` → **frontend-only** = the user reviews on the **Vercel preview**; **backend / full-stack**
+= it needs a **local checkout** to run on 3000/8000 (a preview can't exercise backend). Surface that
+per PR so the user knows whether to look at a preview or pull it in. The reviewer NEVER merges and
+NEVER tears down workers (they stay alive for iteration).
 ```
 REVIEW QUEUE (verified, in merge order)
-  1. #26 feature/f008-quiz      tests PASS  review PASS   READY-VERIFIED  (disjoint)
-  2. #25 feature/f021-referral  tests PASS  review PASS   READY-VERIFIED  (after #26: both touch lib/db.ts)
+  1. #26 feature/f008-quiz      tests PASS  review PASS  READY-VERIFIED  review: PREVIEW (frontend-only)  (disjoint)
+  2. #25 feature/f021-referral  tests PASS  review PASS  READY-VERIFIED  review: LOCAL checkout (backend)  (after #26: both touch lib/db.ts)
 Awaiting fixes:
   #31 feature/f045-progress     review CHANGES-REQUESTED -> nudged worker
 Not yet verified: #33 (CI still running)
