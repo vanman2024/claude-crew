@@ -132,8 +132,54 @@ function Format-TestSection {
     return ($lines -join "`n")
 }
 
+# Render the work-type + spec section (section 0 of every brief). There are exactly
+# TWO work types: 'feature' (a new build, spec is the source of truth) and 'iteration'
+# (a change to existing code, spec is context/reference). -Spec is an OPTIONAL
+# repo-relative path to the authoritative spec for this work.
+function Format-WorkTypeSection {
+    param(
+        [Parameter(Mandatory)][ValidateSet('feature', 'iteration')][string]$Mode,
+        [string]$Spec
+    )
+    if ($Mode -eq 'feature') {
+        if ($Spec) {
+            return @"
+## 0. Work type: NEW FEATURE - build to the spec (READ THIS FIRST)
+This is a NEW FEATURE. Its spec is the SOURCE OF TRUTH: read ``$Spec`` IN FULL before you
+plan, and build to it. Every change must trace back to the spec. If the spec is unclear,
+incomplete, or conflicts with the codebase, say so in your plan BEFORE building - do not
+invent behavior the spec does not describe.
+"@
+        }
+        return @"
+## 0. Work type: NEW FEATURE - needs a spec (READ THIS FIRST)
+This is a NEW FEATURE but no spec path was provided. New features should be spec-driven.
+If a spec exists for this area, find and read it (look under ``specs/``). If none exists,
+write a SHORT spec first (problem, entities/data-flow, surfaces, acceptance criteria),
+put it in your plan, and confirm direction before building straight through.
+"@
+    }
+    if ($Spec) {
+        return @"
+## 0. Work type: ITERATION - change existing code (READ THIS FIRST)
+This is an ITERATION on an existing feature, NOT a new build. Make ONLY the change this
+task/issue describes; do not rebuild or re-architect. Read ``$Spec`` for CONTEXT on how the
+feature is meant to work, but treat it as REFERENCE - the existing code is the baseline.
+Explore the current implementation first, then make the focused change.
+"@
+    }
+    return @"
+## 0. Work type: ITERATION - change existing code (READ THIS FIRST)
+This is an ITERATION on an existing feature, NOT a new build. Make ONLY the change this
+task/issue describes; do not rebuild or re-architect. Explore the current implementation
+first (and any relevant ``specs/`` or ``docs/`` for this feature), then make the focused change.
+"@
+}
+
 # Build the full worker brief markdown.
 #   -Task is the freeform body (issue body, spec pointer, feature description).
+#   -Mode is 'feature' or 'iteration' (defaults: 'iteration' when -IssueNumber is set,
+#   else 'feature'). -Spec is an optional repo-relative path to the authoritative spec.
 function New-WorkerBrief {
     param(
         [Parameter(Mandatory)]$Config,
@@ -141,7 +187,9 @@ function New-WorkerBrief {
         [Parameter(Mandatory)][string]$Branch,
         [Parameter(Mandatory)][string]$Task,
         [int]$IssueNumber,
-        [string]$Title
+        [string]$Title,
+        [ValidateSet('feature', 'iteration')][string]$Mode,
+        [string]$Spec
     )
 
     $teams    = Format-TeamsSection -Config $Config
@@ -156,12 +204,21 @@ function New-WorkerBrief {
     }
     $titleLine = if ($Title) { "**Task:** $Title`n" } else { "" }
 
+    # Exactly two work types. Default: an issue-backed brief is an iteration; a plain
+    # task brief is a new feature. Caller can override with -Mode.
+    if (-not $Mode) {
+        $Mode = if ($PSBoundParameters.ContainsKey('IssueNumber') -and $IssueNumber) { 'iteration' } else { 'feature' }
+    }
+    $workType = Format-WorkTypeSection -Mode $Mode -Spec $Spec
+
     return @"
 # Worktree brief: $Name
 
 You are a worker in an isolated git worktree on branch ``$Branch`` for project **$($Config.projectName)**. An orchestrator is watching this psmux pane and will steer you. You are autonomous and running with --dangerously-skip-permissions: plan first, then build straight through to a PR. Do not stop to ask for permission or approval.
 
 $titleLine
+
+$workType
 
 ## 1. Orient
 1. Read ``CLAUDE.md`` (and any ``*/CLAUDE.md``) for project rules.

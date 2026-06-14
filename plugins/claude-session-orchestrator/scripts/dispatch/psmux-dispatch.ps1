@@ -33,6 +33,11 @@ param(
     [string]$Title,
     [int]$IssueNumber,
 
+    # Work type + spec, fed into the brief. -Mode feature|iteration (default: iteration
+    # when -IssueNumber is set, else feature). -Spec = repo-relative path to the spec.
+    [ValidateSet('feature', 'iteration')][string]$Mode,
+    [string]$Spec,
+
     # Config resolution (see _session-config.ps1)
     [string]$Config,
     [string]$RepoPath,
@@ -94,6 +99,11 @@ if ($BootstrapFile) {
     $briefArgs = @{ Config = $cfg; Name = $Name; Branch = $Branch; Task = $Task }
     if ($Title) { $briefArgs.Title = $Title }
     if ($PSBoundParameters.ContainsKey('IssueNumber') -and $IssueNumber) { $briefArgs.IssueNumber = $IssueNumber }
+    if ($Mode) { $briefArgs.Mode = $Mode }
+    if ($Spec) {
+        $briefArgs.Spec = $Spec
+        if (-not (Test-Path (Join-Path $RepoRoot $Spec))) { Step "WARN: spec '$Spec' not found under $RepoRoot (worker is still told to read it)" }
+    }
     $bootstrapContent = New-WorkerBrief @briefArgs
 } else {
     Write-Error "Provide -Task <desc>, -Bootstrap <text>, or -BootstrapFile <path>"; exit 1

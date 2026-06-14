@@ -3,6 +3,18 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.4] — 2026-06-13
+
+### Added
+- **Spec-driven dispatch with two explicit work types.** Every brief now opens with a
+  `## 0. Work type` section: **NEW FEATURE** (build to the spec — the source of truth) or
+  **ITERATION** (change existing code; the spec is context/reference, the existing code is
+  the baseline; do not rebuild). Both dispatchers (`psmux-dispatch.ps1`, `dispatch-codex.ps1`)
+  take `-Spec <repo-relative path>` and `-Mode feature|iteration` and flow them into
+  `New-WorkerBrief`. Mode defaults to `iteration` when `-IssueNumber` is set, else `feature`.
+  The dispatcher warns if the spec path is not found. This wires a project's existing
+  `specs/` tree into the worker bootstrap so workers always get the authoritative context.
+
 ## [0.2.3] — 2026-06-13
 
 ### Added

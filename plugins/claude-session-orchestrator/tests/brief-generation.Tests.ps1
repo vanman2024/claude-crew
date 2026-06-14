@@ -183,3 +183,63 @@ Describe "New-WorkerBrief" {
         ($mapIdx -lt $planIdx -and $mapIdx -ge 0) | Should -BeTrue
     }
 }
+
+Describe "Format-WorkTypeSection (the two work types)" {
+
+    It "feature + spec: build TO the spec as source of truth" {
+        $s = Format-WorkTypeSection -Mode feature -Spec 'specs/booking/spec.md'
+        $s | Should -Match 'NEW FEATURE'
+        $s | Should -Match 'SOURCE OF TRUTH'
+        $s | Should -Match 'specs/booking/spec\.md'
+    }
+
+    It "feature without a spec: nudges to get/write one" {
+        $s = Format-WorkTypeSection -Mode feature
+        $s | Should -Match 'NEW FEATURE'
+        $s | Should -Match 'no spec path was provided'
+    }
+
+    It "iteration + spec: spec is CONTEXT/reference, existing code is the baseline" {
+        $s = Format-WorkTypeSection -Mode iteration -Spec 'specs/booking/spec.md'
+        $s | Should -Match 'ITERATION'
+        $s | Should -Match 'REFERENCE'
+        $s | Should -Match 'do not rebuild'
+        $s | Should -Match 'specs/booking/spec\.md'
+    }
+
+    It "iteration without a spec: still says change-existing-only" {
+        $s = Format-WorkTypeSection -Mode iteration
+        $s | Should -Match 'ITERATION'
+        $s | Should -Match 'do not rebuild'
+    }
+
+    It "rejects an unknown mode" {
+        { Format-WorkTypeSection -Mode rewrite } | Should -Throw
+    }
+}
+
+Describe "New-WorkerBrief work-type wiring" {
+
+    BeforeAll {
+        $script:Cfg = Get-MonorepoConfig
+        $script:TaskText = "Mobile-optimize the settings pages."
+    }
+
+    It "defaults to FEATURE when there is no issue" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "x" -Branch "feat/x" -Task $script:TaskText
+        $brief | Should -Match '## 0\. Work type: NEW FEATURE'
+    }
+
+    It "defaults to ITERATION when -IssueNumber is given" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "x" -Branch "fix/x" -Task $script:TaskText -IssueNumber 578
+        $brief | Should -Match '## 0\. Work type: ITERATION'
+    }
+
+    It "injects the -Spec path and honors an explicit -Mode" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "x" -Branch "fix/x" -Task $script:TaskText -IssueNumber 578 -Mode iteration -Spec 'specs/settings/spec.md'
+        $brief | Should -Match 'specs/settings/spec\.md'
+        $brief | Should -Match 'ITERATION'
+        # section 0 comes before section 1
+        ($brief.IndexOf('## 0. Work type') -lt $brief.IndexOf('## 1. Orient')) | Should -BeTrue
+    }
+}
