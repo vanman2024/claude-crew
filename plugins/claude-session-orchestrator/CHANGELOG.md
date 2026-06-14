@@ -3,6 +3,18 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.6] — 2026-06-13
+
+### Changed
+- **Workers run SCOPED unit tests, not the full suite.** The brief's test gate (section 5)
+  was the project's *full* test command (whole `pytest` / `tsc` + `pnpm test`), so workers
+  burned 15-30 min re-running the entire codebase — redundantly, since GitHub Actions CI
+  already runs the full Backend + Frontend suites on every PR (and the full local run can
+  hang on integration tests needing live services). `Format-TestSection` now instructs the
+  worker to run ONLY the unit tests covering its change (scope the runner to the specific
+  test files/modules) plus the typecheck, and explicitly NOT to run the whole suite — CI
+  does that. The configured commands remain as the tooling reference.
+
 ## [0.2.5] — 2026-06-13
 
 ### Fixed

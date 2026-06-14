@@ -141,18 +141,30 @@ $rails
     return $body.ToString()
 }
 
-# Render the test-command block from config.layout.
+# Render the test-command block from config.layout. Workers run ONLY the unit tests that
+# cover their change + the typecheck; the FULL Backend/Frontend suites run in GitHub Actions
+# CI on the PR (running them locally is slow, redundant, and can hang on integration tests).
 function Format-TestSection {
     param([Parameter(Mandatory)]$Config)
     $cmds = Get-TestCommands -Config $Config
+
+    $guidance = @"
+**Run ONLY the unit tests that cover your change - NOT the full test suite.** The full
+Backend and Frontend suites run in GitHub Actions CI on every PR, so running them locally is
+slow, redundant, and can hang on integration tests that need live services. Your LOCAL gate
+is: the relevant UNIT tests for the files you changed (scope the runner to those specific
+test files/modules) PLUS the typecheck. Do NOT run the whole suite to prove it - CI does that.
+"@
+
     if (-not $cmds -or @($cmds).Count -eq 0) {
-        return "Run whatever test/typecheck commands this project uses, and fix ALL failures before committing."
+        return $guidance + "`n`nUse this project's test runner + typecheck, SCOPED to your change. Do NOT open a PR with failing unit tests or type errors."
     }
+
     $lines = @()
     foreach ($c in $cmds) {
-        $lines += "- **$($c.name):** ``$($c.cmd)``"
+        $lines += "- **$($c.name)** tooling (SCOPE the test run to your change - pass the specific test path/pattern, do NOT run it whole): ``$($c.cmd)``"
     }
-    return ($lines -join "`n")
+    return $guidance + "`n`nProject test tooling:`n" + ($lines -join "`n") + "`n`nDo NOT open a PR with failing unit tests or type errors. A scoped green run + typecheck is enough; the full Backend/Frontend suites run in CI on the PR."
 }
 
 # Render the work-type + spec section (section 0 of every brief). There are exactly
@@ -268,10 +280,8 @@ List every file you will create or modify and what each change does. Each change
 
 $teams
 
-## 5. Test before commit — fix ALL failures
+## 5. Test before commit — run SCOPED unit tests (the full suite runs in CI)
 $tests
-
-Do NOT create a PR with failing tests or type errors.
 
 ## 6. Commit, push, PR
 Use plain inline commit messages (no temp file, no backticks). Then:

@@ -150,6 +150,13 @@ Describe "New-WorkerBrief" {
         $brief | Should -Match 'pytest'
     }
 
+    It "tells workers to run SCOPED unit tests, not the full suite (CI runs the full suite)" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
+        $brief | Should -Match 'NOT the full test suite'
+        $brief | Should -Match 'CI'
+        $brief | Should -Match 'SCOPE the test run'
+    }
+
     It "emits the WORKTREE_STATUS COMPLETE and BLOCKED sentinels" {
         $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
         $brief | Should -Match 'WORKTREE_STATUS: COMPLETE'
