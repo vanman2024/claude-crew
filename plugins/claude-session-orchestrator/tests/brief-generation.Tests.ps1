@@ -243,3 +243,32 @@ Describe "New-WorkerBrief work-type wiring" {
         ($brief.IndexOf('## 0. Work type') -lt $brief.IndexOf('## 1. Orient')) | Should -BeTrue
     }
 }
+
+Describe "Format-TeamsSection is CLI-aware (Codex must not block on Claude agents)" {
+
+    It "claude (default): keeps the subagent mandate + BLOCKED rule" {
+        $s = Format-TeamsSection -Config (Get-MonorepoConfig)
+        $s | Should -Match 'subagent_type'
+        $s | Should -Match 'BLOCKED'
+        $s | Should -Match 'nextjs-frontend:component-builder-agent'
+    }
+
+    It "codex: keeps file-lanes/path ownership but drops the Claude-agent mandate" {
+        $s = Format-TeamsSection -Config (Get-MonorepoConfig) -WorkerCli codex
+        $s | Should -Match '### Team: frontend'
+        $s | Should -Match 'Owns paths'
+        $s | Should -Match 'frontend/components/\*\*'
+        # no Claude-only demands that would make Codex block
+        $s | Should -Not -Match 'use these exact'
+        $s | Should -Not -Match 'silently fall back'   # the Claude "BLOCKED ... and stop" mandate
+        $s | Should -Not -Match 'nextjs-frontend:component-builder-agent'
+        # tells it the Claude agents are N/A, build directly
+        $s | Should -Match 'Claude-specific'
+    }
+
+    It "New-WorkerBrief -WorkerCli codex produces a non-blocking brief" {
+        $brief = New-WorkerBrief -Config (Get-MonorepoConfig) -Name "x" -Branch "fix/x" -Task "do a thing" -WorkerCli codex
+        $brief | Should -Not -Match 'print ``BLOCKED: <agent> unavailable``'
+        $brief | Should -Match 'Owns paths'
+    }
+}

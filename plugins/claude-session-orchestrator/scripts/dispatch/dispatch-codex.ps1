@@ -81,7 +81,7 @@ if ($BootstrapFile) {
 } elseif ($Bootstrap) {
     $bootstrapContent = $Bootstrap
 } elseif ($Task) {
-    $briefArgs = @{ Config = $cfg; Name = $Name; Branch = $Branch; Task = $Task }
+    $briefArgs = @{ Config = $cfg; Name = $Name; Branch = $Branch; Task = $Task; WorkerCli = 'codex' }
     if ($Title) { $briefArgs.Title = $Title }
     if ($PSBoundParameters.ContainsKey('IssueNumber') -and $IssueNumber) { $briefArgs.IssueNumber = $IssueNumber }
     if ($Mode) { $briefArgs.Mode = $Mode }

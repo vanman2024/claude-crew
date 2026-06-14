@@ -3,6 +3,20 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.2.5] — 2026-06-13
+
+### Fixed
+- **CLI-aware agent section so Codex workers don't block on Claude's agents.** The
+  `config.teams` agents/skills are Claude Code plugin subagents (`subagent_type` names);
+  a Codex worker has no such system and was correctly printing `BLOCKED: <agent>
+  unavailable` per the brief's own rule. `Format-TeamsSection` / `New-WorkerBrief` now
+  take `-WorkerCli`: for a non-Claude worker the brief keeps the **file-lane / path-
+  ownership** discipline but drops the "use these exact `subagent_type` names / BLOCK if
+  missing" mandate and tells the worker to build directly (it may use its own native
+  subagents). Both dispatchers pass the resolved CLI name through. (Codex does have its
+  own subagents + `AGENTS.md`; wiring Codex-native custom agents is a separate, optional
+  follow-up.)
+
 ## [0.2.4] — 2026-06-13
 
 ### Added

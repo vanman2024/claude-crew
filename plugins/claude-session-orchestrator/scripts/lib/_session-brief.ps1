@@ -15,7 +15,16 @@ Set-StrictMode -Version Latest
 # Render the agent-team / file-lane section from config.teams. Returns '' when no
 # teams are declared (project falls back to a generic single-Claude build flow).
 function Format-TeamsSection {
-    param([Parameter(Mandatory)]$Config)
+    param(
+        [Parameter(Mandatory)]$Config,
+        [string]$WorkerCli = 'claude'
+    )
+
+    # The config.teams agents/skills are Claude Code plugin subagents (subagent_type
+    # names). A non-Claude worker (e.g. Codex) has no such system, so for it we keep the
+    # file-lane discipline but drop the "use these exact agents / BLOCKED if missing"
+    # mandate - otherwise the worker correctly blocks on agents it can never have.
+    $isClaude = ($WorkerCli -eq 'claude')
 
     if (-not ($Config.PSObject.Properties.Name -contains "teams") -or $null -eq $Config.teams) {
         return @"
@@ -29,9 +38,15 @@ non-overlapping work, but there is no required agent roster.
     }
 
     $sb = New-Object System.Text.StringBuilder
-    [void]$sb.AppendLine("## MANDATORY: use the SPECIALIZED agents for this project — NEVER ``general-purpose`` for build work")
-    [void]$sb.AppendLine("")
-    [void]$sb.AppendLine("Split work by ROLE / FILE-LANE, not by feature-slice. Each lane below owns disjoint paths so parallel agents do not collide. Launch the independent agents in a SINGLE message so they run concurrently, then run an API-contract verification pass (frontend fetch types == route types == backend models; no drift, no ``any``, no dead endpoints).")
+    if ($isClaude) {
+        [void]$sb.AppendLine("## MANDATORY: use the SPECIALIZED agents for this project — NEVER ``general-purpose`` for build work")
+        [void]$sb.AppendLine("")
+        [void]$sb.AppendLine("Split work by ROLE / FILE-LANE, not by feature-slice. Each lane below owns disjoint paths so parallel agents do not collide. Launch the independent agents in a SINGLE message so they run concurrently, then run an API-contract verification pass (frontend fetch types == route types == backend models; no drift, no ``any``, no dead endpoints).")
+    } else {
+        [void]$sb.AppendLine("## Work by ROLE / FILE-LANE (path ownership)")
+        [void]$sb.AppendLine("")
+        [void]$sb.AppendLine("Split work by ROLE / FILE-LANE, not by feature-slice. Each lane below owns disjoint paths - stay inside the lane(s) this task belongs to so parallel workers do not collide. After building, run an API-contract check (frontend fetch types == route types == backend models; no drift, no dead endpoints).")
+    }
     [void]$sb.AppendLine("")
 
     foreach ($teamName in $Config.teams.PSObject.Properties.Name) {
@@ -40,22 +55,30 @@ non-overlapping work, but there is no required agent roster.
         if (($team.PSObject.Properties.Name -contains "ownsPaths") -and $team.ownsPaths) {
             [void]$sb.AppendLine("- **Owns paths:** $((($team.ownsPaths) -join ', '))")
         }
-        if (($team.PSObject.Properties.Name -contains "agents") -and $team.agents) {
-            [void]$sb.AppendLine("- **Agents (use these exact ``subagent_type`` names):**")
-            foreach ($a in $team.agents) { [void]$sb.AppendLine("    - ``$a``") }
-        }
-        if (($team.PSObject.Properties.Name -contains "skills") -and $team.skills) {
-            $bt = [char]96
-            $skillList = ($team.skills | ForEach-Object { "$bt$_$bt" }) -join ', '
-            [void]$sb.AppendLine("- **Skills:** $skillList")
+        if ($isClaude) {
+            if (($team.PSObject.Properties.Name -contains "agents") -and $team.agents) {
+                [void]$sb.AppendLine("- **Agents (use these exact ``subagent_type`` names):**")
+                foreach ($a in $team.agents) { [void]$sb.AppendLine("    - ``$a``") }
+            }
+            if (($team.PSObject.Properties.Name -contains "skills") -and $team.skills) {
+                $bt = [char]96
+                $skillList = ($team.skills | ForEach-Object { "$bt$_$bt" }) -join ', '
+                [void]$sb.AppendLine("- **Skills:** $skillList")
+            }
         }
         [void]$sb.AppendLine("")
     }
 
     [void]$sb.AppendLine("**Hard rules (non-negotiable):**")
-    [void]$sb.AppendLine("- Do NOT use ``general-purpose`` for build work when a specialized agent is configured for that lane.")
-    [void]$sb.AppendLine("- Launch independent agents in a SINGLE message so they run concurrently.")
-    [void]$sb.AppendLine("- If a needed specialized agent is NOT available in this environment, print ``BLOCKED: <agent> unavailable`` and stop — do NOT silently fall back to ``general-purpose``.")
+    if ($isClaude) {
+        [void]$sb.AppendLine("- Do NOT use ``general-purpose`` for build work when a specialized agent is configured for that lane.")
+        [void]$sb.AppendLine("- Launch independent agents in a SINGLE message so they run concurrently.")
+        [void]$sb.AppendLine("- If a needed specialized agent is NOT available in this environment, print ``BLOCKED: <agent> unavailable`` and stop — do NOT silently fall back to ``general-purpose``.")
+    } else {
+        [void]$sb.AppendLine("- Respect the path ownership above: only edit files in the lane(s) this task belongs to; do not touch another lane's paths.")
+        [void]$sb.AppendLine("- Build directly with your own capabilities. The ``subagent_type`` names and skills used in Claude briefs are Claude-specific and are NOT available to you - do NOT wait for them or print BLOCKED about a missing Claude agent.")
+        [void]$sb.AppendLine("- You MAY use your own native subagents (e.g. explorer / worker) for parallel exploration, but it is not required.")
+    }
     return $sb.ToString()
 }
 
@@ -189,10 +212,11 @@ function New-WorkerBrief {
         [int]$IssueNumber,
         [string]$Title,
         [ValidateSet('feature', 'iteration')][string]$Mode,
-        [string]$Spec
+        [string]$Spec,
+        [string]$WorkerCli = 'claude'
     )
 
-    $teams    = Format-TeamsSection -Config $Config
+    $teams    = Format-TeamsSection -Config $Config -WorkerCli $WorkerCli
     $dataflow = Format-DataFlowSection -Config $Config
     $tests    = Format-TestSection -Config $Config
     $base  = $Config.defaultBranch
