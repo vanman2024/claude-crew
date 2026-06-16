@@ -8,6 +8,13 @@
   "workerCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
   "devServer": { "port": 3000, "dir": "frontend" },
   "review": { "intervalMin": 5 },
+  "previewServer": {
+    "portOffset": 100,
+    "worktreeName": "_preview",
+    "backend": {
+      "devCmd": ".venv\\Scripts\\python.exe -m uvicorn app.main:app --port {port} --reload"
+    }
+  },
   "layout": {
     "type": "monorepo-split",
     "parts": [

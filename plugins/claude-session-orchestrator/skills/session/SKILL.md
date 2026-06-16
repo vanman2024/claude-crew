@@ -1,7 +1,7 @@
 ---
 name: session
 description: Start, resume, finish, monitor, orchestrate, and review parallel git-worktree build sessions on Windows using psmux. Spawns Claude workers per worktree, polls them on /loop, and runs a dedicated reviewer that verifies each PR (tests + /code-review) before you merge. Project-agnostic — driven by .claude/session-plugin.json. Triggers on "/session", "start a worktree", "dispatch workers", "orchestrate the build", "review the PRs", "blast through these issues".
-argument-hint: "[list|start|start-issues|resume|finish|pull|cleanup|monitor|server-start|server-check|server-stop|orchestrate|review|review-start] [name|issue-numbers]"
+argument-hint: "[list|start|start-issues|resume|finish|pull|cleanup|monitor|server-start|server-check|server-stop|preview-start|preview-switch|preview-stop|preview-status|orchestrate|review|review-start] [name|issue-numbers|PR#]"
 disable-model-invocation: false
 allowed-tools: Bash(git *), Bash(gh *), Bash(node *), Bash(bash *), Bash(pwsh *), Bash(psmux *), Bash(powershell.exe *), Bash(cmd.exe *), Bash(pwd), Bash(cat *), Read, Glob, Grep
 ---
@@ -97,6 +97,9 @@ Leave the worker's worktree + psmux window **running**. The user keeps workers a
 | `cleanup` | Remove zombie worktree dirs + kill orphan windows |
 | `monitor <name>` | Single poll cycle: capture-pane → analyze → send-keys if needed |
 | `server-start/check/stop` | Manage a detached dev server for a worktree |
+| `preview-start <PR#\|branch>` | **Live PR review env.** Boot a PR on DERIVED ports (3100/8100) in one persistent `_preview` worktree — without touching your 3000/8000 |
+| `preview-switch <PR#\|branch>` | Swap the loaded PR in the SAME env; servers stay up + hot-reload (no reinstall). The iteration loop |
+| `preview-stop` / `preview-status` | Free the preview ports / show the loaded branch + whether servers are up |
 | `orchestrate [...]` | Unified loop: dashboard / dispatch / poll / verify / pull / cleanup |
 | `review` | One reviewer cycle: check out the next green PR, run tests + `/code-review`, label `READY-VERIFIED`, update the ordered merge queue. The `/loop` body. |
 | `review-start` | Spawn the dedicated **Reviewer** Claude (the overseer) in its own window + `/loop`. Auto-launched by the orchestrator. |
@@ -119,6 +122,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 | `teardown/close-worker.ps1` | **Junction-first** post-merge teardown. `-Name <worker>`. |
 | `teardown/cleanup-worktrees.ps1` / `nuke-worktrees.ps1` / `kill-worktree-agents.ps1` | Cleanup helpers |
 | `server/dev-server.ps1` | Start/stop/check a detached dev server. `-Action start\|stop\|status -Dir <worktree>` |
+| `server/preview-server.ps1` | **Live PR preview env.** One persistent `_preview` worktree that cycles PR branches on DERIVED ports (real installs, not junctions), booted as `preview-fe`/`preview-be` psmux windows. `-Action start\|switch\|stop\|status -Ref <PR#\|branch>`. Driven by `config.previewServer`. |
 | `status/check-worktree-health.ps1` | Health (git, deps, env). `-Name <n>\|-All [-Json]` |
 | `status/check-headless-workers.ps1` | **Monitor the headless build-ahead lane.** Reports each `dispatch-codex.ps1` worker's state (RUNNING/COMPLETE/BLOCKED/EXITED) + PR URL from its meta + logs (they are NOT psmux windows). `-Config <cfg> [-Json]`. |
 | `status/install-worktree-hooks.sh` | Install per-worktree status hooks (optional; psmux capture-pane is the primary channel) |
@@ -146,6 +150,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 - `list`, `start`, `resume`, `finish` — [reference/commands-core.md](reference/commands-core.md)
 - `monitor` — [reference/commands-monitor.md](reference/commands-monitor.md)
 - `server-start/check/stop` — [reference/commands-server.md](reference/commands-server.md) and [reference/server-rules.md](reference/server-rules.md)
+- `preview-start/switch/stop/status` (live PR review env) — [reference/commands-preview.md](reference/commands-preview.md)
 - `pull` — [reference/commands-pull.md](reference/commands-pull.md)
 - `cleanup` — [reference/commands-cleanup.md](reference/commands-cleanup.md)
 - `orchestrate` — [reference/commands-orchestrate.md](reference/commands-orchestrate.md)
@@ -229,6 +234,27 @@ Single poll cycle: `psmux capture-pane -t <sess>:<name> -p` → analyze (buildin
 powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start|status|stop -Dir "<wt>/<name>" -Config "<repo>/.claude/session-plugin.json"
 ```
 See [reference/commands-server.md](reference/commands-server.md).
+
+---
+
+## `preview-start` / `preview-switch` / `preview-stop` / `preview-status`
+
+A **persistent, branch-cycling preview environment** for live human review — the
+**local** analog of the Vercel preview in the Merge protocol (for backend / full-stack
+PRs a Vercel preview can't exercise). Distinct from `review` / `review-start` (the
+automated overseer): this is a place a human looks at and iterates on a running PR.
+
+```
+powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/preview-server.ps1" -Action start|switch|stop|status -Ref <PR#|branch> -Config "<repo>/.claude/session-plugin.json"
+```
+
+One `_preview` worktree (`<wt>\_preview`) with **real installs** (not junctions) runs
+the PR on **derived ports** — frontend `devServer.port + previewServer.portOffset`
+(default `3000→3100`), backend `8000→8100` — as `preview-fe`/`preview-be` psmux
+windows, **never touching the main 3000/8000**. `preview-switch <PR#>` swaps the branch
+in the same env (servers hot-reload, no reinstall) — the iteration loop. Driven by
+`config.previewServer`. See [reference/commands-preview.md](reference/commands-preview.md)
+and [reference/server-rules.md](reference/server-rules.md).
 
 ---
 

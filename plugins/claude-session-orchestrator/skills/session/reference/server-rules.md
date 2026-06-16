@@ -20,3 +20,16 @@ Applies to ALL session commands. When encountering server-related issues:
 The dev server itself is always started/stopped via
 `${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1` (see `commands-server.md`),
 never the raw dev command.
+
+## Preview environment (live PR review) — separate ports, separate worktree
+
+The `preview` commands (`scripts/server/preview-server.ps1`, see
+`commands-preview.md`) run a **persistent, branch-cycling** review env that must NOT
+collide with the main session's server:
+
+| Rule | Why |
+|------|-----|
+| **Derived ports only** — frontend `config.devServer.port + previewServer.portOffset` (default 100), backend `backendBasePort` (default 8000) `+ portOffset`. NEVER bind the main 3000/8000. | The user keeps coding on 3000/8000; the preview is a *second* pair of servers. |
+| **One `_preview` worktree, reused** for every PR (cycle branches with `preview-switch`), not one per PR. | One install, ever; no CPU spike from N live servers. |
+| **REAL install in the preview worktree** (`node_modules` + python `.venv`), NOT a junction. Detach any stale junction first (`rmdir`, removes the link not the target). | A junctioned `node_modules` shares the main repo's cache — a second `next dev` collides. The preview env needs its own deps. |
+| **Servers run as psmux windows** (`preview-fe` / `preview-be`); inspect with `capture-pane`. | Persistent across CLI calls, killable by name; no foreground-blocking dev command, no extra daemon. |

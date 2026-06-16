@@ -3,6 +3,42 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-06-15
+
+### Added
+- **Live PR preview environment (`preview` commands + `server/preview-server.ps1`).**
+  A persistent, branch-cycling review env so a human can iterate on PR branches live
+  **without disturbing the main coding session or spiking CPU with N dev servers**. It
+  is the **local** analog of the Vercel preview in the Merge protocol — for backend /
+  full-stack PRs a Vercel preview can't exercise. (Named `preview`, not `review`, to
+  avoid colliding with the existing automated reviewer/overseer `review` / `review-start`.)
+  - **One persistent `_preview` worktree**, reused for every PR — not one-per-PR.
+  - **REAL dependency install** in it (`node_modules` + python `.venv`), **not** the
+    worker-style junction: a junctioned `node_modules` shares the main repo's cache, so
+    a second `next dev` would collide. The preview env gets its own deps, installed once
+    (a stale junction is detached with `rmdir` first). This is the key difference from
+    worker worktrees (Critical Rule 6).
+  - **Derived ports, never the main ones** — frontend `config.devServer.port +
+    previewServer.portOffset` (default `100`, so `3000→3100`), backend `backendBasePort`
+    (default 8000) `+ portOffset` (`8000→8100`).
+  - **Servers run as named psmux windows** (`preview-fe` / `preview-be`) — persistent
+    across CLI calls, inspectable via `capture-pane`, killable by name. No new daemon;
+    reuses the psmux primitive the plugin already depends on.
+  - Commands: `preview-start <PR#|branch>` (ensure worktree + deps, checkout, boot),
+    `preview-switch <PR#|branch>` (swap branch in the same env, servers hot-reload — the
+    iteration loop), `preview-stop` (kill windows + free ports), `preview-status` (loaded
+    branch + server health). A PR number resolves to its head branch via
+    `gh pr view <n> --json headRefName`.
+  - New config block `previewServer` (`portOffset`, `worktreeName`, `frontend{dir,
+    installCmd,devCmd}`, `backend{dir,venv,basePort,installCmd,devCmd}`; `{port}` token
+    in a devCmd is substituted). All optional: the frontend derives from `devServer`, and
+    the backend auto-derives from a `monorepo-split` layout part that declares `pythonVenv`.
+  - Resolution is pure + unit-tested (`Get-PreviewServerConfig` / `Get-BackendVenvPart`
+    in `lib/_session-config.ps1`); new `tests/preview-server.Tests.ps1` covers port
+    derivation, branch→worktree mapping, and the script contract (now 121 Pester tests).
+  - Docs: `reference/commands-preview.md`, plus `server-rules.md` + `SKILL.md` updated
+    (Quick Reference, scripts table, command section, references).
+
 ## [0.2.7] — 2026-06-13
 
 ### Changed

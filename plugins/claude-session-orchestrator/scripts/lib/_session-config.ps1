@@ -159,6 +159,108 @@ function Get-PsmuxTarget {
     return "$($Config.psmuxSession):$Name"
 }
 
+# True when $Object has a non-null property $Name. Safe under Set-StrictMode
+# (plain `$o.maybe` throws on a missing property), so all optional-config reads
+# go through this.
+function Test-CfgProp {
+    param($Object, [string]$Name)
+    return ($null -ne $Object -and ($Object.PSObject.Properties.Name -contains $Name) -and $null -ne $Object.$Name)
+}
+
+# --- Preview-environment resolution ------------------------------------------
+# The preview env is ONE persistent worktree (<worktreesPath>\<worktreeName>,
+# default "_preview") that cycles PR branches for live human review. Unlike worker
+# worktrees it gets REAL dependency installs (NOT a node_modules junction) so its
+# dev servers can run alongside the main repo's without sharing a cache. Servers
+# bind DERIVED ports (never the main devServer port): frontend = devServer.port +
+# portOffset, backend = backendBasePort (default 8000) + portOffset. This is the
+# LOCAL analog of the Vercel preview in the Merge protocol — for backend / full-
+# stack PRs a Vercel preview can't exercise.
+#
+# Config (all optional; sane defaults shown):
+#   "previewServer": {
+#     "portOffset": 100,
+#     "worktreeName": "_preview",
+#     "frontend": { "dir": "frontend", "installCmd": "pnpm install",
+#                   "devCmd": "npx next dev -p {port} -H 0.0.0.0" },
+#     "backend":  { "dir": "backend", "venv": ".venv", "basePort": 8000,
+#                   "installCmd": "<venv pip> install -r requirements.txt",
+#                   "devCmd": "<venv python> -m uvicorn app.main:app --port {port}" }
+#   }
+# When previewServer.backend is omitted the backend is auto-derived from a
+# monorepo-split layout part that declares "pythonVenv" (its `path` + `pythonVenv`).
+# `{port}` in a devCmd is substituted with the derived port. installCmd/devCmd that
+# resolve to $null are filled in at runtime by preview-server.ps1 (lockfile-detected
+# install for the frontend; venv create + pip install for the backend). A backend
+# with no resolvable devCmd is reported and skipped (no safe universal default).
+
+# The monorepo-split layout part that declares a python venv, if any.
+function Get-BackendVenvPart {
+    param([Parameter(Mandatory)]$Config)
+    if ($Config.layout.type -ne 'monorepo-split') { return $null }
+    if (-not (Test-CfgProp $Config.layout 'parts')) { return $null }
+    foreach ($part in $Config.layout.parts) {
+        if (Test-CfgProp $part 'pythonVenv') { return $part }
+    }
+    return $null
+}
+
+# Resolve the effective preview-env settings (ports, worktree, dirs, commands).
+# Pure: takes only $Config, performs no IO — so it is unit-testable. Returns a
+# [pscustomobject] consumed by preview-server.ps1.
+function Get-PreviewServerConfig {
+    param([Parameter(Mandatory)]$Config)
+
+    $ps = if (Test-CfgProp $Config 'previewServer') { $Config.previewServer } else { $null }
+
+    $offset = if (Test-CfgProp $ps 'portOffset')   { [int]$ps.portOffset }      else { 100 }
+    $wtName = if (Test-CfgProp $ps 'worktreeName') { [string]$ps.worktreeName } else { "_preview" }
+
+    # --- frontend (base port/dir from devServer; overridable via previewServer.frontend) ---
+    $dev = if (Test-CfgProp $Config 'devServer') { $Config.devServer } else { $null }
+    $feBase = if (Test-CfgProp $dev 'port') { [int]$dev.port }    else { 3000 }
+    $feDir  = if (Test-CfgProp $dev 'dir')  { [string]$dev.dir }  else { "." }
+    $feDevCmd  = 'npx next dev -p {port} -H 0.0.0.0'
+    $feInstall = $null
+    $fe = if (Test-CfgProp $ps 'frontend') { $ps.frontend } else { $null }
+    if (Test-CfgProp $fe 'dir')        { $feDir     = [string]$fe.dir }
+    if (Test-CfgProp $fe 'devCmd')     { $feDevCmd  = [string]$fe.devCmd }
+    if (Test-CfgProp $fe 'installCmd') { $feInstall = [string]$fe.installCmd }
+    $fePort = $feBase + $offset
+
+    # --- backend (explicit previewServer.backend, else derived from a venv layout part) ---
+    $be     = if (Test-CfgProp $ps 'backend') { $ps.backend } else { $null }
+    $bePart = Get-BackendVenvPart -Config $Config
+    $beDir = $null; $beVenv = $null; $beBase = 8000; $beDevCmd = $null; $beInstall = $null
+    if ($bePart) { $beDir = [string]$bePart.path; $beVenv = [string]$bePart.pythonVenv }
+    if (Test-CfgProp $be 'dir')        { $beDir     = [string]$be.dir }
+    if (Test-CfgProp $be 'venv')       { $beVenv    = [string]$be.venv }
+    if (Test-CfgProp $be 'basePort')   { $beBase    = [int]$be.basePort }
+    if (Test-CfgProp $be 'devCmd')     { $beDevCmd  = [string]$be.devCmd }
+    if (Test-CfgProp $be 'installCmd') { $beInstall = [string]$be.installCmd }
+    $bePort = $beBase + $offset
+
+    # Substitute the {port} token now so callers get ready-to-run command lines.
+    $feDevCmd = $feDevCmd -replace '\{port\}', $fePort
+    if ($beDevCmd) { $beDevCmd = $beDevCmd -replace '\{port\}', $bePort }
+
+    return [pscustomobject]@{
+        worktreeName       = $wtName
+        worktreePath       = (Join-Path $Config.worktreesPath $wtName)
+        portOffset         = $offset
+        frontendPort       = $fePort
+        backendPort        = $bePort
+        frontendDir        = $feDir
+        backendDir         = $beDir
+        backendVenv        = $beVenv
+        frontendDevCmd     = $feDevCmd
+        frontendInstallCmd = $feInstall
+        backendDevCmd      = $beDevCmd
+        backendInstallCmd  = $beInstall
+        hasBackend         = [bool]$beDir
+    }
+}
+
 # Kebab-case slug from arbitrary text (issue titles etc).
 function ConvertTo-SessionSlug {
     param([Parameter(Mandatory)][string]$Text, [int]$MaxLength = 40)
