@@ -50,6 +50,17 @@ param(
     # Skip dependency wiring (faster when reusing a warm worktree)
     [switch]$SkipDeps,
 
+    # Resume the worker's PRIOR conversation in this worktree instead of starting fresh
+    # (claude --continue / codex resume --last). Requires the worktree to ALREADY exist:
+    # no re-provision, no new brief. Used by restore-session.ps1 after a crash/reboot.
+    # NB: resumes the LATEST session in the dir, so run this BEFORE any fresh dispatch,
+    # or a new session would shadow the deep pre-reboot one.
+    [switch]$Continue,
+
+    # With -Continue: recreate the window + relaunch the worker but send NO resume nudge
+    # (leave it idle at the prompt for you to drive). Default sends a "keep going" nudge.
+    [switch]$NoNudge,
+
     # Per-worker CLI override (else config.workerCli). E.g. -WorkerCliName codex runs a
     # Codex worker in THIS psmux window while other windows in the session stay Claude.
     [string]$WorkerCliName,
@@ -90,7 +101,12 @@ if (-not $Branch)  { $Branch  = "feature/$Name" }
 function Step($msg) { Write-Host "[psmux-dispatch] $msg" }
 
 # --- 0. Resolve bootstrap content ---------------------------------------------
-if ($BootstrapFile) {
+# In -Continue (resume) mode there is NO new brief: the worktree and its prior
+# conversation already exist, so we skip brief resolution entirely.
+$bootstrapContent = $null
+if ($Continue) {
+    # no-op: resume mode reuses the existing .claude-bootstrap.md + conversation
+} elseif ($BootstrapFile) {
     if (-not (Test-Path $BootstrapFile)) { Write-Error "BootstrapFile not found: $BootstrapFile"; exit 1 }
     $bootstrapContent = Get-Content $BootstrapFile -Raw
 } elseif ($Bootstrap) {
@@ -121,8 +137,19 @@ if (-not (Test-Path $WorkerCmd)) {
 # Create/reuse worktree + copy env files + .mcp.json + write .claude-bootstrap.md +
 # junction node_modules. Single source of truth in Initialize-WorkerWorktree so the
 # interactive and headless paths cannot drift.
-$WtPath = Initialize-WorkerWorktree -Config $cfg -Name $Name -Branch $Branch -BaseRef $BaseRef `
-    -BootstrapContent $bootstrapContent -SkipDeps:$SkipDeps -LogTag "psmux-dispatch"
+if ($Continue) {
+    # Resume mode: the worktree must already exist; do NOT re-provision (no env copy,
+    # no dep wiring, no brief overwrite). Resolve the branch the worktree actually has.
+    if (-not (Test-Path $WtPath)) {
+        Write-Error "Continue mode: worktree '$WtPath' does not exist - nothing to resume. Dispatch it fresh first."; exit 1
+    }
+    $wtBranch = (git -C $WtPath rev-parse --abbrev-ref HEAD 2>$null)
+    if ($wtBranch -and $wtBranch -ne 'HEAD') { $Branch = $wtBranch }
+    Step "Continue mode: reusing existing worktree $WtPath (branch $Branch) - no re-provision"
+} else {
+    $WtPath = Initialize-WorkerWorktree -Config $cfg -Name $Name -Branch $Branch -BaseRef $BaseRef `
+        -BootstrapContent $bootstrapContent -SkipDeps:$SkipDeps -LogTag "psmux-dispatch"
+}
 
 # --- 6. Ensure psmux session + add window -------------------------------------
 $sessionExists = (psmux ls 2>$null | Select-String -SimpleMatch "$Session")
@@ -147,6 +174,22 @@ psmux new-window -t $Session -n $Name -c $WtPath
 $target = "${Session}:${Name}"
 $argLine    = ($WorkerCli.args -join ' ')
 $launchLine = if ($argLine) { "$WorkerCmd $argLine" } else { "$WorkerCmd" }
+# -Continue: prepend the CLI's resume invocation so it reattaches its prior
+# conversation in THIS worktree dir. claude uses the --continue flag; codex uses a
+# `resume --last` subcommand (both verified). Other CLIs: no resume, launch fresh.
+if ($Continue) {
+    $resumeFlag = switch ($WorkerCli.name) {
+        'codex'  { 'resume --last' }
+        'claude' { '--continue' }
+        default  { $null }
+    }
+    if ($resumeFlag) {
+        $launchLine = if ($argLine) { "$WorkerCmd $resumeFlag $argLine" } else { "$WorkerCmd $resumeFlag" }
+        Step "Continue mode: resuming prior $($WorkerCli.name) session ($resumeFlag)"
+    } else {
+        Step "Continue mode: worker CLI '$($WorkerCli.name)' has no known resume flag - launching fresh (it will re-read .claude-bootstrap.md)"
+    }
+}
 Step "Launching worker CLI '$($WorkerCli.name)' in $target ($launchLine)"
 
 # Clear inherited env vars FIRST (profile.clearEnv). For Claude this nulls
@@ -199,13 +242,22 @@ if ($hasPatterns) {
     Start-Sleep -Seconds $WorkerCli.bootWaitSec
 }
 
-Step "Sending bootstrap message"
-psmux send-keys -t $target "Read .claude-bootstrap.md in this worktree root and follow it exactly. You are an autonomous worker: plan first, then build straight through to a PR. Do not stop to ask for permission or approval." Enter
+if ($Continue) {
+    if ($NoNudge) {
+        Step "Continue mode (-NoNudge): worker resumed, left idle at the prompt for you to drive"
+    } else {
+        Step "Sending resume nudge"
+        psmux send-keys -t $target "Your terminal was interrupted (crash / power loss / reboot) and this session was just resumed. Re-check git status and your last few steps to see what already landed, then CONTINUE your task straight through to a PR. Do not restart from scratch or redo finished work." Enter
+    }
+} else {
+    Step "Sending bootstrap message"
+    psmux send-keys -t $target "Read .claude-bootstrap.md in this worktree root and follow it exactly. You are an autonomous worker: plan first, then build straight through to a PR. Do not stop to ask for permission or approval." Enter
+}
 
 # A long paste can absorb its own trailing Enter into the input box instead of
 # submitting. Send a standalone Enter to actually submit the prompt.
 Start-Sleep -Seconds 2
-psmux send-keys -t $target "" Enter
+if (-not ($Continue -and $NoNudge)) { psmux send-keys -t $target "" Enter }
 
 Step "DISPATCHED: $target  (attach with: psmux attach -t $Session)"
 Write-Host "SESSION=$Session"

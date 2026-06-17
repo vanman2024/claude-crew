@@ -112,6 +112,64 @@ Describe "Shared worktree provisioning" {
     }
 }
 
+Describe "psmux-dispatch.ps1 -Continue (resume mode)" {
+    BeforeAll { $script:PsmuxBody = Get-Content $script:PsmuxScript -Raw }
+
+    It "declares the -Continue and -NoNudge switches" {
+        $script:PsmuxBody | Should -Match '\[switch\]\$Continue'
+        $script:PsmuxBody | Should -Match '\[switch\]\$NoNudge'
+    }
+
+    It "uses the verified per-CLI resume invocations (claude --continue / codex resume --last)" {
+        $script:PsmuxBody | Should -Match "'codex'\s*\{\s*'resume --last'"
+        $script:PsmuxBody | Should -Match "'claude'\s*\{\s*'--continue'"
+    }
+
+    It "skips re-provisioning in continue mode and requires the worktree to already exist" {
+        # Initialize-WorkerWorktree must be gated behind the NON-continue branch
+        $script:PsmuxBody | Should -Match 'Continue mode: reusing existing worktree'
+        $script:PsmuxBody | Should -Match 'nothing to resume'
+    }
+
+    It "sends a resume nudge (not the first-time bootstrap) unless -NoNudge" {
+        $script:PsmuxBody | Should -Match 'resume nudge'
+        $script:PsmuxBody | Should -Match 'was interrupted'
+    }
+}
+
+Describe "restore-session.ps1 (crash recovery)" {
+    BeforeAll {
+        $script:RestoreScript = Join-Path $script:ScriptsDir "dispatch\restore-session.ps1"
+        $script:RestoreBody   = Get-Content $script:RestoreScript -Raw
+    }
+
+    It "exists and parses" {
+        Test-Path $script:RestoreScript | Should -BeTrue
+        (Get-ParseErrors $script:RestoreScript).Count | Should -Be 0
+    }
+
+    It "attaches (no rebuild) when the psmux session is still alive" {
+        $script:RestoreBody | Should -Match 'is ALIVE'
+        $script:RestoreBody | Should -Match 'SESSION_ALIVE='
+        $script:RestoreBody | Should -Match 'psmux attach -t'
+    }
+
+    It "discovers worktrees via git worktree list and skips the _preview env" {
+        $script:RestoreBody | Should -Match 'git -C \$RepoRoot worktree list --porcelain'
+        $script:RestoreBody | Should -Match "_preview"
+    }
+
+    It "re-dispatches each worktree through psmux-dispatch -Continue" {
+        $script:RestoreBody | Should -Match 'psmux-dispatch.ps1'
+        $script:RestoreBody | Should -Match "'-Continue'"
+    }
+
+    It "passes -NoNudge through when -Idle is set" {
+        $script:RestoreBody | Should -Match '\[switch\]\$Idle'
+        $script:RestoreBody | Should -Match "if \(\`$Idle\) \{ \`$dispatchArgs \+= '-NoNudge'"
+    }
+}
+
 Describe "start-orchestrator.ps1 auto-launches the reviewer" {
     It "has a -NoReviewer opt-out switch" {
         $body = Get-Content $script:OrchScript -Raw
