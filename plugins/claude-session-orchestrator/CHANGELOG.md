@@ -3,6 +3,22 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-06-16
+
+### Added
+- **Per-worktree real dependency install (`worktreeDeps` config, default `"junction"`).**
+  Worker worktrees previously always **junctioned** `node_modules` from the main checkout —
+  fast and low-disk, but a junctioned `node_modules` is shared, so a second `next dev` (one
+  per worktree) collides on it. Setting `"worktreeDeps": "install"` makes `Initialize-WorkerWorktree`
+  do a **REAL per-worktree install** instead (lockfile-detected: pnpm/yarn/npm; with pnpm it
+  hardlinks from the global store, so it's cheap after the first). Any stale junction is detached
+  with `rmdir` first (link only — the main checkout is untouched) so the install is independent.
+  This is what lets **every worktree run its own dev server / Playwright**. `"junction"` (default)
+  preserves the old behavior; unknown values fall back to junction. New helpers
+  `Get-WorktreeDepsMode` / `Get-DetectedInstallCmd` in `lib/_session-config.ps1`, covered by
+  `tests/config-resolution.Tests.ps1` (+6 tests). Both example templates ship
+  `"worktreeDeps": "install"`, and `session-init` documents the key.
+
 ## [0.2.7] — 2026-06-13
 
 ### Changed

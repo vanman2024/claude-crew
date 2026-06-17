@@ -126,6 +126,33 @@ function Get-NodeModuleMappings {
     return ($rels | ForEach-Object { $_ -replace '/', '\' } | Select-Object -Unique)
 }
 
+# How worker worktrees get their node_modules. Config key `worktreeDeps`:
+#   "junction" (default) - share the main checkout's node_modules via a junction
+#                          (fast, low-disk; fine for build/test-only workers, but a
+#                          second `next dev` collides on the shared dir).
+#   "install"            - REAL per-worktree install (with pnpm, hardlinks from the
+#                          global store, so cheap after the first). Needed when each
+#                          worktree runs its own dev server / Playwright.
+# Returns the lowercased mode string; unknown/absent values fall back to "junction".
+function Get-WorktreeDepsMode {
+    param([Parameter(Mandatory)]$Config)
+    if (($Config.PSObject.Properties.Name -contains "worktreeDeps") -and $Config.worktreeDeps) {
+        $mode = "$($Config.worktreeDeps)".ToLower()
+        if ($mode -eq "install") { return "install" }
+    }
+    return "junction"
+}
+
+# Detect the install command from the lockfile present in $Dir (the dir holding
+# package.json). Mirrors preview-server.ps1's Get-DetectedInstall.
+function Get-DetectedInstallCmd {
+    param([Parameter(Mandatory)][string]$Dir)
+    if (Test-Path (Join-Path $Dir "pnpm-lock.yaml"))    { return "pnpm install" }
+    if (Test-Path (Join-Path $Dir "yarn.lock"))         { return "yarn install" }
+    if (Test-Path (Join-Path $Dir "package-lock.json")) { return "npm install" }
+    return "pnpm install"
+}
+
 # Test commands the worker should run, with <repo> resolved to the MAIN repo
 # (workers reuse main's installed deps / venv by absolute path; see psmux-dispatch).
 # Returns an array of [pscustomobject]@{ name; cmd }.
@@ -240,45 +267,52 @@ function Initialize-WorkerWorktree {
         _wtstep "Wrote .claude-bootstrap.md"
     }
 
-    # 5. Worktree deps. Default: JUNCTION node_modules from main (fast, build-only).
-    #    config.worktreeDeps='install': real `pnpm install` per worktree so the dev
-    #    server (`next dev`) actually runs there — a junction BREAKS next dev.
+    # 5. Provision node_modules per the `worktreeDeps` config (default: "junction").
+    #    "install" gives each worktree a REAL, independent node_modules so it can run
+    #    its own dev server / Playwright; "junction" shares the main checkout's.
+    $depsMode = Get-WorktreeDepsMode -Config $Config
     if (-not $SkipDeps) {
-        $installMode = ($Config.PSObject.Properties.Name -contains 'worktreeDeps') -and ($Config.worktreeDeps -eq 'install')
         foreach ($rel in (Get-NodeModuleMappings -Config $Config)) {
             $wtNm   = Join-Path $WtPath $rel
             $mainNm = Join-Path $RepoRoot $rel
-            if ($installMode) {
-                # Detach any stale junction FIRST (link only, never recurse) so pnpm
-                # never writes through to the main checkout. Same method as close-worker.
-                if (Test-Path $wtNm) {
-                    $nmItem = Get-Item $wtNm -Force
-                    if ((($nmItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-                        _wtstep "Detaching stale '$rel' junction before install (link only, main untouched)"
-                        cmd /c rmdir "$wtNm" | Out-Null
-                    } else {
-                        _wtstep "'$rel' is a real dir - assuming already installed, skipping"
-                        continue
-                    }
-                }
-                $pkgDir = Join-Path $WtPath (Split-Path $rel -Parent)
-                if (-not (Test-Path $pkgDir)) {
-                    _wtstep "WARN: package dir '$pkgDir' missing - cannot install '$rel'"
+            if ($depsMode -eq "install") {
+                $pkgDir = Split-Path $wtNm -Parent   # dir holding package.json/lockfile
+                if (-not (Test-Path (Join-Path $pkgDir "package.json"))) {
+                    _wtstep "WARN: no package.json in '$pkgDir' - skipping install for '$rel'"
                     continue
                 }
-                _wtstep "Installing deps in '$pkgDir' (pnpm install) - runnable dev server"
-                Push-Location $pkgDir
-                try { & pnpm install 2>&1 | Out-Null } finally { Pop-Location }
-            }
-            elseif (-not (Test-Path $mainNm)) {
-                _wtstep "WARN: main checkout has no '$rel' - install deps in the main repo first, then re-dispatch"
-            } elseif (Test-Path $wtNm) {
-                _wtstep "'$rel' already present in worktree - leaving as-is"
+                # Detach any stale junction first so the install is REAL + independent
+                # (rmdir removes the link, NOT the main checkout it points at).
+                if (Test-Path $wtNm) {
+                    $item = Get-Item $wtNm -Force
+                    if ($item.LinkType) {
+                        _wtstep "Detaching stale '$rel' junction before install"
+                        cmd /c "rmdir `"$wtNm`"" | Out-Null
+                    }
+                }
+                if (Test-Path $wtNm) {
+                    _wtstep "'$rel' already installed in worktree - leaving as-is"
+                } else {
+                    $install = Get-DetectedInstallCmd -Dir $pkgDir
+                    _wtstep "Installing '$rel' (real per-worktree, not junction): $install"
+                    Push-Location $pkgDir
+                    try {
+                        cmd /c $install
+                        if ($LASTEXITCODE -ne 0) { throw "worktree dep install failed in '$pkgDir' ($install)" }
+                    } finally { Pop-Location }
+                }
             } else {
-                $wtNmParent = Split-Path $wtNm -Parent
-                if (-not (Test-Path $wtNmParent)) { New-Item -ItemType Directory -Path $wtNmParent -Force | Out-Null }
-                _wtstep "Junctioning '$rel' from main checkout (no install)"
-                New-Item -ItemType Junction -Path $wtNm -Target $mainNm | Out-Null
+                # junction mode (default, backward-compatible)
+                if (-not (Test-Path $mainNm)) {
+                    _wtstep "WARN: main checkout has no '$rel' - install deps in the main repo first, then re-dispatch"
+                } elseif (Test-Path $wtNm) {
+                    _wtstep "'$rel' already present in worktree - leaving as-is"
+                } else {
+                    $wtNmParent = Split-Path $wtNm -Parent
+                    if (-not (Test-Path $wtNmParent)) { New-Item -ItemType Directory -Path $wtNmParent -Force | Out-Null }
+                    _wtstep "Junctioning '$rel' from main checkout (no install)"
+                    New-Item -ItemType Junction -Path $wtNm -Target $mainNm | Out-Null
+                }
             }
         }
     }

@@ -122,7 +122,15 @@ giant architecture doc. It can be hand-edited in the config any time.
 Write `<repoPath>\.claude\session-plugin.json` (create `.claude` if needed) with
 exactly the schema shown in the examples. Required top-level keys:
 `projectName, repoPath, worktreesPath, psmuxSession, githubRepo, defaultBranch,
-workerCmdPath, layout`. Optional: `devServer`, `teams`, `dataFlow`, `review`, `workerCli`.
+workerCmdPath, layout`. Optional: `devServer`, `teams`, `dataFlow`, `review`, `workerCli`,
+`worktreeDeps`.
+
+> `worktreeDeps` (optional) controls how each worker worktree gets its `node_modules`:
+> `"junction"` (default) shares the main checkout's `node_modules` via a junction — fast and
+> low-disk, fine for build/test-only workers, but a second `next dev` collides on the shared
+> dir. `"install"` does a REAL per-worktree install (with pnpm, hardlinks from the global
+> store, so cheap after the first) — use it when each worktree runs its own dev server /
+> Playwright. Default to `"install"` for dev-server-per-worktree workflows.
 
 > `review` (optional) configures the **reviewer** (overseer) loop that verifies each PR
 > (tests + `/code-review`) before you merge. Shape: `{ "intervalMin": 5 }`. Omit it for the
@@ -143,7 +151,7 @@ Check the environment the pipeline needs and report PASS/FAIL for each:
 - `psmux ls` works (psmux installed)
 - the `workerCmdPath` file exists
 - `gh auth status` is logged in
-- the main repo has installed deps at each `nodeModules` mapping (workers junction these — if absent, tell the user to install in the main repo first)
+- the main repo has installed deps at each `nodeModules` mapping (when `worktreeDeps` is `"junction"`, workers junction these — if absent, tell the user to install in the main repo first; with `"install"` each worktree installs its own, so the main checkout's deps are not required)
 
 Then print the next steps:
 
