@@ -3,6 +3,25 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] — 2026-06-17
+
+### Fixed
+- **Workers no longer kill Claude Code (and the whole crew) when freeing a port.**
+  Nothing in the plugin ran a broad kill — but the brief never told workers *how* to
+  free a port, so they improvised `taskkill /IM node.exe` / `Stop-Process -Name node`
+  / blanket `npx kill-port`. On Windows, Claude Code, the orchestrator, the reviewer,
+  and every worktree's `next dev` are all `node.exe`, so a name-based kill takes down
+  the running session itself. The generated worker brief now carries a hard
+  **"NEVER kill a process by name"** rule (forbidden commands listed) and points at the
+  port-scoped path: `dev-server.ps1 -Action stop` / `kill-port.ps1 -Port <port>` (single
+  owning PID only). Mirrored in `build-protocol.md` + `server-rules.md`; new regression
+  test in `brief-generation.Tests.ps1`.
+- **`worktreeDeps=install` no longer poisons the worktree path.** The per-worktree
+  `pnpm install` wrote native stdout into `Initialize-WorkerWorktree`'s return pipeline,
+  corrupting `$WtPath` and silently breaking psmux window creation downstream. Install
+  output is now redirected to `.pnpm-install.log` in the package dir. (Rescued from a
+  fix that had been made directly in the disposable plugin cache.)
+
 ## [0.3.0] — 2026-06-16
 
 ### Added

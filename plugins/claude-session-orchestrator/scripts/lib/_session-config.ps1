@@ -297,8 +297,11 @@ function Initialize-WorkerWorktree {
                     _wtstep "Installing '$rel' (real per-worktree, not junction): $install"
                     Push-Location $pkgDir
                     try {
-                        cmd /c $install
-                        if ($LASTEXITCODE -ne 0) { throw "worktree dep install failed in '$pkgDir' ($install)" }
+                        # Redirect ALL install output to a log file. Otherwise the native
+                        # stdout flows into this function's return pipeline and poisons
+                        # $WtPath, silently breaking psmux window creation downstream.
+                        cmd /c $install *> (Join-Path $pkgDir '.pnpm-install.log')
+                        if ($LASTEXITCODE -ne 0) { throw "worktree dep install failed in '$pkgDir' ($install) - see .pnpm-install.log" }
                     } finally { Pop-Location }
                 }
             } else {
