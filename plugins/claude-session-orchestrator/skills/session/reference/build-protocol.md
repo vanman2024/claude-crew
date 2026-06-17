@@ -244,4 +244,29 @@ pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action status 
 pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop   -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
 ```
 
+### NEVER kill a process by name (it kills Claude Code itself)
+
+On Windows, **Claude Code, the orchestrator, the reviewer, and every worktree's
+`next dev` are ALL `node.exe`.** So a name-based or blanket kill takes down the
+entire session — your own worker, the orchestrator watching it, and every other
+worktree's server — all at once. This is the single most common way a build run
+self-destructs.
+
+**FORBIDDEN — never run any of these:**
+
+```
+taskkill /IM node.exe          taskkill /F /IM node
+Get-Process node | Stop-Process    Stop-Process -Name node
+killall node    pkill node    (blanket) npx kill-port across ports
+```
+
+**Free a port the safe way — one PID on one port, never a name sweep:**
+
+- Stop your dev server: `dev-server.ps1 -Action stop` (above) — it is scoped to the
+  single PID listening on the configured port.
+- A stuck specific port: `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1" -Port <port>`
+  (kills only the one listener on that port).
+- Touch only YOUR worktree's server. If a port you need is held by a *different*
+  worktree, report it to the orchestrator — do not kill across worktrees.
+
 See `commands-server.md` and `server-rules.md` for details.

@@ -157,6 +157,15 @@ Describe "New-WorkerBrief" {
         $brief | Should -Match 'SCOPE the test run'
     }
 
+    It "forbids name-based process kills (Claude Code is node.exe) and points at the safe port-scoped path" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
+        $brief | Should -Match 'NEVER kill a process by name'
+        $brief | Should -Match 'taskkill /IM node\.exe'
+        $brief | Should -Match 'kill-port\.ps1'
+        # The plugin-root token must stay literal (not expanded at brief-build time).
+        $brief.Contains('${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1') | Should -BeTrue
+    }
+
     It "emits the WORKTREE_STATUS COMPLETE and BLOCKED sentinels" {
         $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
         $brief | Should -Match 'WORKTREE_STATUS: COMPLETE'
