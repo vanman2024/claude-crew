@@ -240,12 +240,37 @@ function Initialize-WorkerWorktree {
         _wtstep "Wrote .claude-bootstrap.md"
     }
 
-    # 5. JUNCTION node_modules from the main checkout (proven: junction, do NOT install).
+    # 5. Worktree deps. Default: JUNCTION node_modules from main (fast, build-only).
+    #    config.worktreeDeps='install': real `pnpm install` per worktree so the dev
+    #    server (`next dev`) actually runs there — a junction BREAKS next dev.
     if (-not $SkipDeps) {
+        $installMode = ($Config.PSObject.Properties.Name -contains 'worktreeDeps') -and ($Config.worktreeDeps -eq 'install')
         foreach ($rel in (Get-NodeModuleMappings -Config $Config)) {
             $wtNm   = Join-Path $WtPath $rel
             $mainNm = Join-Path $RepoRoot $rel
-            if (-not (Test-Path $mainNm)) {
+            if ($installMode) {
+                # Detach any stale junction FIRST (link only, never recurse) so pnpm
+                # never writes through to the main checkout. Same method as close-worker.
+                if (Test-Path $wtNm) {
+                    $nmItem = Get-Item $wtNm -Force
+                    if ((($nmItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                        _wtstep "Detaching stale '$rel' junction before install (link only, main untouched)"
+                        cmd /c rmdir "$wtNm" | Out-Null
+                    } else {
+                        _wtstep "'$rel' is a real dir - assuming already installed, skipping"
+                        continue
+                    }
+                }
+                $pkgDir = Join-Path $WtPath (Split-Path $rel -Parent)
+                if (-not (Test-Path $pkgDir)) {
+                    _wtstep "WARN: package dir '$pkgDir' missing - cannot install '$rel'"
+                    continue
+                }
+                _wtstep "Installing deps in '$pkgDir' (pnpm install) - runnable dev server"
+                Push-Location $pkgDir
+                try { & pnpm install 2>&1 | Out-Null } finally { Pop-Location }
+            }
+            elseif (-not (Test-Path $mainNm)) {
                 _wtstep "WARN: main checkout has no '$rel' - install deps in the main repo first, then re-dispatch"
             } elseif (Test-Path $wtNm) {
                 _wtstep "'$rel' already present in worktree - leaving as-is"
