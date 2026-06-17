@@ -6,6 +6,7 @@
   "githubRepo": "vanman2024/RedAI",
   "defaultBranch": "master",
   "workerCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
+  "worktreeDeps": "install",
   "devServer": { "port": 3000, "dir": "frontend" },
   "review": { "intervalMin": 5 },
   "previewServer": {

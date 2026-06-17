@@ -204,6 +204,57 @@ Describe "Get-NodeModuleMappings" {
     }
 }
 
+Describe "Get-WorktreeDepsMode" {
+
+    It "reads worktreeDeps=install from the example templates" {
+        (Get-WorktreeDepsMode -Config (Get-Content $script:MonorepoExample -Raw | ConvertFrom-Json)) | Should -Be "install"
+        (Get-WorktreeDepsMode -Config (Get-Content $script:RootExample     -Raw | ConvertFrom-Json)) | Should -Be "install"
+    }
+
+    It "defaults to junction when the key is absent (backward compatible)" {
+        $cfg = Get-Content $script:MonorepoExample -Raw | ConvertFrom-Json
+        $cfg.PSObject.Properties.Remove('worktreeDeps')
+        (Get-WorktreeDepsMode -Config $cfg) | Should -Be "junction"
+    }
+
+    It "falls back to junction for an unknown value" {
+        $cfg = Get-Content $script:MonorepoExample -Raw | ConvertFrom-Json
+        $cfg.worktreeDeps = "bogus"
+        (Get-WorktreeDepsMode -Config $cfg) | Should -Be "junction"
+    }
+
+    It "is case-insensitive on the install value" {
+        $cfg = Get-Content $script:MonorepoExample -Raw | ConvertFrom-Json
+        $cfg.worktreeDeps = "INSTALL"
+        (Get-WorktreeDepsMode -Config $cfg) | Should -Be "install"
+    }
+}
+
+Describe "Get-DetectedInstallCmd" {
+
+    It "picks the package manager from the lockfile present" {
+        $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("inst-" + [System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        try {
+            New-Item -ItemType File -Path (Join-Path $dir "pnpm-lock.yaml") | Out-Null
+            Get-DetectedInstallCmd -Dir $dir | Should -Be "pnpm install"
+            Remove-Item (Join-Path $dir "pnpm-lock.yaml")
+            New-Item -ItemType File -Path (Join-Path $dir "yarn.lock") | Out-Null
+            Get-DetectedInstallCmd -Dir $dir | Should -Be "yarn install"
+            Remove-Item (Join-Path $dir "yarn.lock")
+            New-Item -ItemType File -Path (Join-Path $dir "package-lock.json") | Out-Null
+            Get-DetectedInstallCmd -Dir $dir | Should -Be "npm install"
+        } finally { Remove-Item $dir -Recurse -Force }
+    }
+
+    It "defaults to pnpm install when no lockfile is present" {
+        $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("inst-" + [System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        try { Get-DetectedInstallCmd -Dir $dir | Should -Be "pnpm install" }
+        finally { Remove-Item $dir -Recurse -Force }
+    }
+}
+
 Describe "Get-TestCommands" {
 
     It "monorepo-split: returns one name/cmd object per part" {
