@@ -92,6 +92,7 @@ Leave the worker's worktree + psmux window **running**. The user keeps workers a
 | `start <name>` | Create worktree, junction deps, dispatch a psmux worker, auto-start monitor loop |
 | `start-issues <n> <n> ...` | **BULK.** One worktree worker per GitHub issue. Branch/window `fix/<n>-<slug>` |
 | `resume <name>` | Health-check + repair worktree, re-dispatch its psmux window |
+| `restore` | **After a crash/power-loss/reboot:** rebuild the psmux session + a window per surviving worktree and **resume each worker's prior conversation** (`claude --continue` / `codex resume --last`). If the psmux session is still alive, just prints the attach command. `-Idle` to resume without nudging; `-Name <wt>` for one worktree. |
 | `finish <name>` | Commit → test → rebase → push → create PR (no merge, no cleanup) |
 | `pull` | PR dashboard, pull merged work into `<base>`, cleanup |
 | `cleanup` | Remove zombie worktree dirs + kill orphan windows |
@@ -112,6 +113,7 @@ powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/disp
 |--------|---------|
 | `dispatch/psmux-dispatch.ps1` | **Primary dispatch.** worktree + env copy + node_modules junction + psmux window + worker launch (boot handshake) + bootstrap. `-Name` + one of `-Task` / `-Bootstrap` / `-BootstrapFile`. Brief flags (when `-Task`): `-Mode feature\|iteration`, `-Spec <repo-rel path>`, `-IssueNumber <n>`. `-WorkerCliName codex` (+ optional `-WorkerCmdOverride`) runs a **Codex** worker in this window instead of Claude — one session can mix both. |
 | `dispatch/psmux-dispatch-issues.ps1` | **Bulk dispatch.** `-Issues 510,511,512` (or positional). Fetches each issue, builds a brief, dispatches per issue. |
+| `dispatch/restore-session.ps1` | **Crash recovery.** psmux server gone (reboot/power loss) but worktrees survive: rebuilds the session + a window per worktree and resumes each worker's prior conversation via `psmux-dispatch.ps1 -Continue` (`claude --continue` / `codex resume --last`). Session still alive → just prints the attach command. `-Idle` (resume, no nudge), `-Name <wt>` (one worktree). |
 | `dispatch/start-orchestrator.ps1` | Spawn the dedicated orchestrator Claude in its own detached worktree + window with the no-auto-merge + batch-scoped brief, then `/loop`. `-IntervalMin 5`. Also spawns the reviewer unless `-NoReviewer`. |
 | `dispatch/start-reviewer.ps1` | Spawn the dedicated **reviewer** Claude (the overseer) in its own home worktree + a `review-checkout` worktree + window. Verifies each green PR (tests + `/code-review`) one at a time, labels `READY-VERIFIED`, builds the ordered queue, then `/loop`. `-IntervalMin 5`. Never merges. |
 | `dispatch/dispatch-worktree.ps1` | Headless one-shot `claude -p` (logs to file) — when you do NOT want an interactive pane |

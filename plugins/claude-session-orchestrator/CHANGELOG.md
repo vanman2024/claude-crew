@@ -3,6 +3,30 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-06-17
+
+### Added
+- **Crash recovery — `restore-session.ps1` + `psmux-dispatch.ps1 -Continue`.** After a
+  power loss / reboot / crash the psmux **server** dies (so `psmux attach` finds nothing)
+  but the git worktrees on disk survive. `restore-session.ps1` rebuilds the psmux session
+  and a window per surviving worktree and **resumes each worker's prior conversation**
+  rather than starting cold:
+  - **Resumes the actual conversation**, CLI-correct and verified from live help:
+    `claude --continue` (flag) and `codex resume --last` (subcommand; cwd-filtered so it
+    picks that worktree's own session). Both still pass the worker's YOLO/no-alt-screen
+    flags. Unknown CLIs launch fresh and re-read `.claude-bootstrap.md`.
+  - **`-Continue` is a true resume mode** in `psmux-dispatch.ps1`: requires the worktree
+    to already exist, does NOT re-provision (no env copy, dep wiring, or brief overwrite),
+    resolves the branch from the worktree's HEAD, and sends a short "you were interrupted,
+    keep going" nudge instead of the first-time bootstrap. Run it BEFORE any fresh dispatch
+    so the resumed pre-crash session is the most-recent one the CLI reattaches.
+  - **Two cases handled automatically:** psmux session still alive (you only closed the
+    terminal) → it just prints `psmux attach -t <sess>`; session gone → rebuild. Worktrees
+    are discovered via `git worktree list --porcelain` (the `_preview` env is skipped).
+  - **`-Idle`** rebuilds + resumes but sends no nudge (leave each worker idle to inspect a
+    possibly half-written state first); **`-Name <wt>`** restores a single worktree.
+  - Contract-tested in `dispatch-scripts.Tests.ps1` (full suite 118 green).
+
 ## [0.3.1] — 2026-06-17
 
 ### Fixed
