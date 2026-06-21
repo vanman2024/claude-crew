@@ -166,6 +166,12 @@ Describe "New-WorkerBrief" {
         $brief.Contains('${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1') | Should -BeTrue
     }
 
+    It "tells workers to run pwsh with -NoProfile (so the user profile / posh-git can't break the dev server)" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
+        $brief | Should -Match 'pwsh -NoProfile -File'
+        $brief | Should -Not -Match 'pwsh -File '
+    }
+
     It "emits the WORKTREE_STATUS COMPLETE and BLOCKED sentinels" {
         $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
         $brief | Should -Match 'WORKTREE_STATUS: COMPLETE'

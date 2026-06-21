@@ -24,7 +24,7 @@ Start the dev server as a DETACHED background process.
 
 2. Run:
    ```
-   pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
+   pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
    ```
    (Port defaults from `config.devServer.port`; the server runs in
    `config.devServer.dir` under the worktree.)
@@ -44,7 +44,7 @@ Check dev server state.
 
 2. Run:
    ```
-   pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action status -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
+   pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action status -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
    ```
 
 3. Interpret against the port from `config.devServer.port`:
@@ -68,7 +68,7 @@ Stop the dev server.
 
 1. Run:
    ```
-   pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
+   pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
    ```
    The script finds the process on the configured port, verifies it belongs to
    this worktree, then kills the parent + children. If the listening process does

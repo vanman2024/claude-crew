@@ -286,13 +286,13 @@ Claude Code itself, the orchestrator, the reviewer, and EVERY other worktree's d
 - FORBIDDEN — never run any of these (they kill Claude Code): ``taskkill /IM node.exe``, ``taskkill /F /IM node``, ``Get-Process node | Stop-Process``, ``Stop-Process -Name node``, ``killall node``, ``pkill node``, or a blanket ``npx kill-port`` sweep across ports.
 - Start / stop / check YOUR dev server ONLY via the script (it is scoped to a single PID on the configured port, never a name sweep):
 ``````
-pwsh -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start  -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
-pwsh -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action status -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
-pwsh -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop   -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start  -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action status -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop   -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
 ``````
 - If ONE specific port is stuck, free ONLY that single PID — never a sweep:
 ``````
-pwsh -File "`${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1" -Port <port>
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1" -Port <port>
 ``````
 - Touch ONLY your own worktree's server. NEVER "kill all servers" or kill by process name — if a port you need is held by another worktree, report it to the orchestrator; do not kill across worktrees.
 

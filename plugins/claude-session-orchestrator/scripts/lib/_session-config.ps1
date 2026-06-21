@@ -13,6 +13,14 @@
 
 Set-StrictMode -Version Latest
 
+# Git for Windows writes progress ("Fetching...", "Cloning...") to STDERR. Under a
+# strict/Stop error preference (and PS 7's native-error handling) that stderr can be
+# treated as a terminating error and abort dispatch — the recurring "session won't
+# start" failure. This special value routes git's stderr to stdout for every git call
+# in this process (and children), so progress is just output, never an error. Every
+# script dot-sources this lib FIRST, so a single assignment here covers all of them.
+$env:GIT_REDIRECT_STDERR = '2>&1'
+
 # --- Locate the config file ---------------------------------------------------
 # Search order:
 #   1. Explicit -Config path (if provided)

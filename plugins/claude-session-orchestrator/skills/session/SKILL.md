@@ -106,7 +106,7 @@ Leave the worker's worktree + psmux window **running**. The user keeps workers a
 
 Scripts are organized by function under `scripts/`. Invoke with the plugin root, e.g.:
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name <name> -Task "<desc>" -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name <name> -Task "<desc>" -Config "<repo>/.claude/session-plugin.json"
 ```
 
 | Script (path under `scripts/`) | Purpose |
@@ -180,7 +180,7 @@ Create a worktree and dispatch an interactive psmux worker. `$ARGUMENTS[1]` is t
 2. Decide the task: a hand-written description, or a spec pointer. You can pass it straight to dispatch as `-Task "<desc>"` — the script will generate the brief and inject the project's `teams` rules.
 3. Dispatch:
    ```
-   powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<description + spec ref>" -Config "<repo>/.claude/session-plugin.json"
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<description + spec ref>" -Config "<repo>/.claude/session-plugin.json"
    ```
 4. Report: branch, worktree path, psmux target (`<sess>:<name>`), attach command (`psmux attach -t <sess>`).
 5. **AUTO-START MONITOR LOOP** — `/loop 3m /session monitor <name>`.
@@ -194,7 +194,7 @@ Never `cd` into the worktree from the main session. Watch it with `psmux capture
 Bulk-dispatch one worktree worker per GitHub issue number.
 
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch-issues.ps1" -Issues <n>,<n>,<n> -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch-issues.ps1" -Issues <n>,<n>,<n> -Config "<repo>/.claude/session-plugin.json"
 ```
 
 Each issue: `gh issue view` (skip if not OPEN) → slug from title → branch/window
@@ -228,7 +228,7 @@ Single poll cycle: `psmux capture-pane -t <sess>:<name> -p` → analyze (buildin
 ## `server-start` / `server-check` / `server-stop`
 
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start|status|stop -Dir "<wt>/<name>" -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start|status|stop -Dir "<wt>/<name>" -Config "<repo>/.claude/session-plugin.json"
 ```
 See [reference/commands-server.md](reference/commands-server.md).
 
@@ -258,7 +258,7 @@ in the no-auto-merge + batch-scoping contracts.
 
 To launch the orchestrator (which also launches the reviewer unless `-NoReviewer`):
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
 ```
 
 ---
@@ -288,7 +288,7 @@ Spawn the dedicated reviewer Claude (its own home + checkout worktrees + psmux w
 `/loop`). Auto-launched by `start-orchestrator.ps1`; run it standalone when you started
 workers without the orchestrator:
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-reviewer.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-reviewer.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
 ```
 Interval resolves from `-IntervalMin`, else `config.review.intervalMin`, else 5 minutes.
 Stop: `psmux kill-window -t <sess>:reviewer` (or it self-terminates).

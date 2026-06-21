@@ -191,7 +191,7 @@ watch + nudge, with the trust-gate/ready boot handshake). For the **build-ahead*
 there is also a **headless** dispatcher that skips the pane and the handshake entirely:
 
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/dispatch-codex.ps1" `
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/dispatch-codex.ps1" `
   -Name f042-backend -Task "Build X per specs/...md" -Config "<repo>/.claude/session-plugin.json"
 ```
 
@@ -265,7 +265,7 @@ All commands are subcommands of `/session` (it reads your config first):
 ### Launch the autonomous orchestrator
 
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
 ```
 
 It spawns a dedicated orchestrator Claude with the no-auto-merge + batch-scoped

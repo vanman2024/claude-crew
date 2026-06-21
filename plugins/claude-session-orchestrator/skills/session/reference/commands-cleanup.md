@@ -54,14 +54,14 @@ they encode the Windows-safe ordering and fallbacks:
 
 - `${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1` — single worktree,
   junction-first (preferred for targeted teardown).
-  `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name "<name>" -Config "<repo>/.claude/session-plugin.json"`
+  `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name "<name>" -Config "<repo>/.claude/session-plugin.json"`
 - `${CLAUDE_PLUGIN_ROOT}/scripts/teardown/cleanup-worktrees.ps1` — remove ALL
   worktree dirs under `<wt>`, then prune (rename-and-delete fallback for stuck dirs).
-  `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/cleanup-worktrees.ps1" -Config "<repo>/.claude/session-plugin.json"`
+  `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/cleanup-worktrees.ps1" -Config "<repo>/.claude/session-plugin.json"`
 - `${CLAUDE_PLUGIN_ROOT}/scripts/teardown/nuke-worktrees.ps1` — last resort:
   kills every process with handles in `<wt>`, then deletes everything (robocopy-mirror
   + rename fallbacks).
-  `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/nuke-worktrees.ps1" -Config "<repo>/.claude/session-plugin.json"`
+  `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/nuke-worktrees.ps1" -Config "<repo>/.claude/session-plugin.json"`
 
 **NOTE**: If a dir is locked by Windows, close editors/terminals pointing into it.
 Last resort: reboot, then re-run cleanup.

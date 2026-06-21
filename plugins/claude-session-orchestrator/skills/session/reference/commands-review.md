@@ -165,7 +165,7 @@ picks up the next PR (or a pushed fix).
 
 Launch the dedicated reviewer Claude (its own worktrees + psmux window + `/loop`):
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-reviewer.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-reviewer.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
 ```
 This is launched automatically by `start-orchestrator.ps1` (unless `-NoReviewer`), so you
 usually do not run it by hand. Use it standalone when you started workers without the

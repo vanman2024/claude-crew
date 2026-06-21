@@ -3,6 +3,24 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] — 2026-06-20
+
+### Fixed
+- **Dispatch no longer dies on the user's PowerShell profile / git stderr ("session
+  won't start").** Every documented invocation ran `powershell.exe -File` / `pwsh -File`
+  **without `-NoProfile`**, so the interactive profile loaded and a failing
+  `Import-Module posh-git` (plus git writing progress to stderr under
+  `ErrorActionPreference=Stop`) aborted the worker dispatch every time. Two-part fix:
+  - **`-NoProfile`** added to every `powershell.exe`/`pwsh` `-File` invocation across the
+    skill docs, reference docs, README, and — critically — the **generated worker brief**
+    (workers were told to run `pwsh -File dev-server.ps1`, so they hit it too).
+  - **`GIT_REDIRECT_STDERR=2>&1`** set once in `_session-config.ps1` (every script
+    dot-sources it first), so git progress goes to stdout and is never treated as a
+    terminating error.
+  - Regression guards in the test suite: no plugin `.ps1` may invoke `-File` without
+    `-NoProfile`, the lib must set `GIT_REDIRECT_STDERR`, and the brief must use
+    `pwsh -NoProfile` (121 tests green).
+
 ## [0.4.0] — 2026-06-17
 
 ### Added

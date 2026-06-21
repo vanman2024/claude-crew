@@ -79,7 +79,7 @@ Run from the MAIN session. **Principle: show everything, touch nothing, until us
     git never follows the junction into the main repo's `node_modules`), kills the
     psmux window, then runs `git worktree remove --force` and `git worktree prune`:
     ```
-    pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name "<name>" -Config "<repo>/.claude/session-plugin.json"
+    pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name "<name>" -Config "<repo>/.claude/session-plugin.json"
     ```
     Then delete the remote branch: `git push origin --delete "feature/<name>" 2>/dev/null || true`
 

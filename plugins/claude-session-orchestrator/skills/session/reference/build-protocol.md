@@ -239,9 +239,9 @@ blocks the terminal and times out. Always use the dev-server script, which reads
 the port + dir from `config.devServer` and runs detached:
 
 ```
-pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start  -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
-pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action status -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
-pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop   -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start  -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action status -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop   -Dir "<wt>\<name>" -Config "<repo>/.claude/session-plugin.json"
 ```
 
 ### NEVER kill a process by name (it kills Claude Code itself)
@@ -264,7 +264,7 @@ killall node    pkill node    (blanket) npx kill-port across ports
 
 - Stop your dev server: `dev-server.ps1 -Action stop` (above) — it is scoped to the
   single PID listening on the configured port.
-- A stuck specific port: `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1" -Port <port>`
+- A stuck specific port: `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1" -Port <port>`
   (kills only the one listener on that port).
 - Touch only YOUR worktree's server. If a port you need is held by a *different*
   worktree, report it to the orchestrator — do not kill across worktrees.
