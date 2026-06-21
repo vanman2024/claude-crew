@@ -150,7 +150,7 @@ the full brief AND auto-injects the project's agent-team / file-lane rules (from
 contract:
 
 ```bash
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<description + spec ref>" -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<description + spec ref>" -Config "<repo>/.claude/session-plugin.json"
 ```
 
 The task body should point the worker at **the task brief and any spec the brief points to**:
@@ -161,12 +161,12 @@ worker is told to read on launch.
 For a hand-written brief instead of an auto-generated one, use `-Bootstrap "<markdown>"`
 (inline) or `-BootstrapFile "<path-to-brief.md>"`:
 ```bash
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -BootstrapFile "<path-to-brief.md>" -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -BootstrapFile "<path-to-brief.md>" -Config "<repo>/.claude/session-plugin.json"
 ```
 
 To re-dispatch into an existing warm worktree (skip the dep junction step):
 ```bash
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<desc>" -SkipDeps -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<desc>" -SkipDeps -Config "<repo>/.claude/session-plugin.json"
 ```
 
 Optional overrides: `-Branch <branch>` (default `feature/<name>`), `-Session <sess>`,
@@ -215,7 +215,7 @@ git -C <repo> worktree list
 
 ### Step 3: Health-check
 ```
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-worktree-health.ps1" -Name "<name>" -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-worktree-health.ps1" -Name "<name>" -Config "<repo>/.claude/session-plugin.json"
 ```
 Or by hand:
 ```
@@ -237,7 +237,7 @@ Check for a live window: `psmux list-windows -t <sess>` and look for `<name>`.
 - If the window exists, just `psmux capture-pane -t <sess>:<name> -p` to see state, then `send-keys` to nudge.
 - If no window, re-add one and relaunch Claude (`-SkipDeps` since deps are already wired):
   ```bash
-  powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<desc>" -SkipDeps -Config "<repo>/.claude/session-plugin.json"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<desc>" -SkipDeps -Config "<repo>/.claude/session-plugin.json"
   ```
 Report branch, last commits, repairs.
 

@@ -165,7 +165,7 @@ Try it:
   /session orchestrate           (dashboard)
 
 Launch the autonomous orchestrator (its own window, /loop polling, no auto-merge):
-  powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -Config "<repoPath>\.claude\session-plugin.json"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -Config "<repoPath>\.claude\session-plugin.json"
 ```
 
 ## Notes

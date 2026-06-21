@@ -157,7 +157,7 @@ Everything else is out of scope for this poll.
    processes, NOT psmux windows — `capture-pane` cannot see them. Enumerate them
    separately and fold them into the report + the self-terminate check:
    ```
-   powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-headless-workers.ps1" -Config "<repo>/.claude/session-plugin.json" -Json
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-headless-workers.ps1" -Config "<repo>/.claude/session-plugin.json" -Json
    ```
    Each row reports `State` (RUNNING/COMPLETE/BLOCKED/EXITED) + `PR`. You cannot nudge a
    headless worker (no pane); if one is `BLOCKED` or `EXITED`, report it and let the user
@@ -263,7 +263,7 @@ itself never merges (Contract 1). See [commands-pull.md](commands-pull.md).
 Force-clean ALL worktree directories regardless of state (nuclear — confirm with the user first):
 
 ```bash
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/nuke-worktrees.ps1" -Config "<repo>/.claude/session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/nuke-worktrees.ps1" -Config "<repo>/.claude/session-plugin.json"
 psmux kill-session -t <sess>   # also tear down the psmux session
 git -C <repo> worktree prune
 ```

@@ -112,6 +112,26 @@ Describe "Shared worktree provisioning" {
     }
 }
 
+Describe "Dispatch robustness: -NoProfile + git stderr (the 'session won't start' fix)" {
+    It "the shared lib routes git stderr to stdout (GIT_REDIRECT_STDERR)" {
+        $lib = Get-Content $script:ConfigLib -Raw
+        $lib | Should -Match "GIT_REDIRECT_STDERR"
+        $lib | Should -Match "'2>&1'"
+    }
+
+    It "no plugin .ps1 invokes powershell/pwsh -File without -NoProfile (would load the user profile / posh-git)" {
+        $offenders = @()
+        Get-ChildItem $script:ScriptsDir -Recurse -Filter *.ps1 | ForEach-Object {
+            foreach ($line in (Get-Content $_.FullName)) {
+                if ($line -match '(powershell(\.exe)? -ExecutionPolicy Bypass -File|pwsh -File)' -and $line -notmatch 'NoProfile') {
+                    $offenders += ("{0}: {1}" -f $_.Name, $line.Trim())
+                }
+            }
+        }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+}
+
 Describe "psmux-dispatch.ps1 -Continue (resume mode)" {
     BeforeAll { $script:PsmuxBody = Get-Content $script:PsmuxScript -Raw }
 

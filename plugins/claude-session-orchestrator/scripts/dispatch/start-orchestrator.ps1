@@ -112,7 +112,7 @@ CONTRACT (do not violate):
 6. When a worker reports ``WORKTREE_STATUS: COMPLETE`` and its PR is open with green CI: report it as ``READY FOR USER REVIEW``. Do NOT merge.
 7. When a worker reports ``WORKTREE_STATUS: BLOCKED``: report the reason and stop nudging that worker.
 8. When a PR is observed merged (by the user) and its worker window still exists: run the teardown script
-   ``powershell.exe -ExecutionPolicy Bypass -File "$CloseWorkerScript" -Name <worker> -Config "$($cfg._configPath)"``
+   ``powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$CloseWorkerScript" -Name <worker> -Config "$($cfg._configPath)"``
    which detaches the node_modules junction(s) FIRST, kills the window, then removes the worktree.
 9. **Self-terminate** the loop when: no live worker windows AND no open PRs from this batch remain. Print a summary, exit the loop, exit Claude.
 

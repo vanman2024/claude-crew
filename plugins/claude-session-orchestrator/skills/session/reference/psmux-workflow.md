@@ -145,7 +145,7 @@ Always tear down with the plugin script (it detaches the `node_modules`
 junction(s) BEFORE removing the worktree, so the main checkout isn't gutted):
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name <name> -Config "<repo>\.claude\session-plugin.json"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name <name> -Config "<repo>\.claude\session-plugin.json"
 ```
 
 The session and other worktree windows keep going. Pattern: spin up windows,
