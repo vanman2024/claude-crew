@@ -166,6 +166,21 @@ Describe "New-WorkerBrief" {
         $brief.Contains('${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1') | Should -BeTrue
     }
 
+    It "mandates a maintained task list, with the CLI-correct tool (Claude: TodoWrite)" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText -WorkerCli 'claude'
+        $brief | Should -Match 'MANDATORY: keep a task list'
+        $brief | Should -Match 'TodoWrite'
+        $brief | Should -Match 'in_progress'
+        $brief.Contains('$taskTool') | Should -BeFalse   # variable must interpolate, not leak literally
+    }
+
+    It "uses Codex's plan tool (update_plan) in a Codex worker's brief" {
+        $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText -WorkerCli 'codex'
+        $brief | Should -Match 'MANDATORY: keep a task list'
+        $brief | Should -Match 'update_plan'
+        $brief | Should -Not -Match 'TodoWrite'
+    }
+
     It "tells workers to run pwsh with -NoProfile (so the user profile / posh-git can't break the dev server)" {
         $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
         $brief | Should -Match 'pwsh -NoProfile -File'

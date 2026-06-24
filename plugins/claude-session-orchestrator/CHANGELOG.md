@@ -3,6 +3,17 @@
 All notable changes to `claude-session-orchestrator` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] — 2026-06-23
+
+### Added
+- **Workers now mandated to keep a task list the whole build.** The generated brief's
+  "Plan first" step gained a hard rule: as soon as the plan is settled, turn it into a
+  tracked task list (CLI-correct tool — Claude `TodoWrite`, Codex `update_plan`) and
+  maintain it throughout (one task `in_progress` at a time, flip to `completed` when done,
+  add tasks as they surface). Workers were drifting / dropping steps on long autonomous
+  runs because they did not consistently track work; this makes it non-optional. New
+  regression tests assert the mandate and the per-CLI tool name.
+
 ## [0.4.1] — 2026-06-20
 
 ### Fixed
