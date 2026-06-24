@@ -247,6 +247,14 @@ function New-WorkerBrief {
     }
     $workType = Format-WorkTypeSection -Mode $Mode -Spec $Spec
 
+    # CLI-aware task-list tool name. Claude tracks work with TodoWrite; Codex with its
+    # built-in plan tool (update_plan). Other CLIs: generic phrasing.
+    $taskTool = switch ($WorkerCli) {
+        'claude' { 'the `TodoWrite` tool' }
+        'codex'  { 'your plan tool (`update_plan`)' }
+        default  { 'your task/todo-list tool' }
+    }
+
     return @"
 # Worktree brief: $Name
 
@@ -277,6 +285,13 @@ $dataflow
 
 ## 4. Plan first (do NOT write code yet)
 List every file you will create or modify and what each change does. Each change must trace back to an entity/flow in the data-flow map above. Identify conflicts/risks. Stay focused on THIS task; if you find unrelated bugs, log them as separate GitHub issues — do not pivot.
+
+### MANDATORY: keep a task list the WHOLE build (this is how you stay on track)
+The moment your plan is settled, turn it into a tracked task list using $taskTool — one item per concrete step — BEFORE you write code. Then maintain it the entire build:
+- Exactly ONE task ``in_progress`` at a time; flip it to ``completed`` the instant it's done.
+- Add new tasks as they surface (a missing dependency, a follow-up, a test to write) instead of holding them in your head.
+- Re-read the list whenever you finish a step to pick the next one.
+This is NOT optional and NOT just for big tasks — on a long autonomous run the task list is the only thing that keeps you from dropping steps or drifting. Never build without a current task list.
 
 $teams
 
