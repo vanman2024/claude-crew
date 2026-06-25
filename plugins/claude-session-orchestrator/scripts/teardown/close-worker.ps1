@@ -51,6 +51,27 @@ Write-Host "[close-worker] Closing worker '$Name'"
 Write-Host "[close-worker]   worktree: $WtPath"
 Write-Host ""
 
+# 0. Force-kill any throwaway dev/backend server still running for THIS worktree, so no
+#    orphaned next/uvicorn process survives teardown (a pile-up of these fries the box).
+#    Matched by command line referencing the worktree path: the frontend (npx next from
+#    the worktree's node_modules) and the backend (uvicorn --app-dir "<worktree>\backend").
+#    Scoped to this worktree only - never a name-based sweep across node processes.
+try {
+    $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -like "*$WtPath*" })
+    if ($procs.Count -gt 0) {
+        foreach ($p in $procs) {
+            Write-Host "[close-worker] Killing worktree server PID $($p.ProcessId) ($($p.Name))"
+            foreach ($child in (Get-CimInstance Win32_Process -Filter "ParentProcessId=$($p.ProcessId)" -ErrorAction SilentlyContinue)) {
+                try { Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+            }
+            try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+        }
+    } else {
+        Write-Host "[close-worker] No worktree servers running (nothing to kill)"
+    }
+} catch { Write-Warning "[close-worker] worktree process sweep skipped: $($_.Exception.Message)" }
+
 # 1. Detach EVERY node_modules junction FIRST (link only, main checkout untouched).
 foreach ($rel in (Get-NodeModuleMappings -Config $cfg)) {
     $junction = Join-Path $WtPath $rel

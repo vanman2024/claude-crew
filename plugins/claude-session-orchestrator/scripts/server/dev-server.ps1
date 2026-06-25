@@ -5,6 +5,20 @@
 
     [int]$Port,
 
+    # THROWAWAY worktree server: ignore the configured port and bind the first FREE
+    # port above the main checkout's port instead (3001, 3002, ...). Picks a port that
+    # no other worktree / the main checkout is using, and NEVER the main port itself,
+    # so a worktree's browser/Playwright check can't collide with or hijack 3000.
+    # The chosen port is runtime-only (a `-p` flag); nothing is written to disk.
+    # For -Action stop/status with -AutoPort you MUST also pass the -Port it printed.
+    [switch]$AutoPort,
+
+    # Point the frontend at a THROWAWAY backend (from backend-server.ps1) for full-stack
+    # verification, instead of the shared main :8000. Sets the configured frontend->backend
+    # env var (backendServer.apiUrlEnv, default NEXT_PUBLIC_API_URL) for THIS process only -
+    # it is never written to .env or any committed file. e.g. -ApiUrl http://localhost:8001
+    [string]$ApiUrl = "",
+
     [string]$Dir = "",
 
     [string]$Config,
@@ -21,6 +35,19 @@ if (-not $PSBoundParameters.ContainsKey('Port')) {
     $Port = 3000
     if (($cfg.PSObject.Properties.Name -contains "devServer") -and $cfg.devServer -and ($cfg.devServer.PSObject.Properties.Name -contains "port") -and $cfg.devServer.port) {
         $Port = [int]$cfg.devServer.port
+    }
+}
+
+# -AutoPort (start only): the configured port is the MAIN checkout's reserved port;
+# pick the first free port ABOVE it for this throwaway worktree server. On stop/status
+# -AutoPort is meaningless (we can't guess which port was picked) - pass -Port instead.
+if ($AutoPort) {
+    if ($Action -eq "start") {
+        $mainPort = $Port
+        $Port = Get-FreePort -BasePort ($mainPort + 1) -Reserve @($mainPort)
+        Write-Host "AUTO_PORT=$Port (main checkout port $mainPort reserved + skipped; active ports skipped)"
+    } else {
+        Write-Warning "-AutoPort only applies to -Action start. For $Action pass the -Port the start step printed."
     }
 }
 
@@ -110,7 +137,16 @@ if ($Action -eq "start") {
 
     # Start the dev server as a DETACHED background process
     $logFile = Join-Path $nextDir "dev-server.log"
-    $startCmd = "cd /d `"$frontendDir`" && npx next dev -p $Port -H 0.0.0.0 > `"$logFile`" 2>&1"
+    # -ApiUrl: point this frontend at a throwaway backend via a RUNTIME env var only
+    # (never written to .env / any committed file). Env name from backendServer.apiUrlEnv.
+    $apiEnvPrefix = ""
+    if ($ApiUrl) {
+        $apiEnvNames = @('NEXT_PUBLIC_API_URL', 'NEXT_PUBLIC_BACKEND_URL')
+        try { $beCfg = Get-WorkerBackendConfig -Config $cfg; if ($beCfg.apiUrlEnv) { $apiEnvNames = @($beCfg.apiUrlEnv) } } catch {}
+        $apiEnvPrefix = ($apiEnvNames | ForEach-Object { "set `"$_=$ApiUrl`" && " }) -join ''
+        Write-Host ("API_URL_ENV=" + ($apiEnvNames -join ',') + "=$ApiUrl (runtime only - not persisted)")
+    }
+    $startCmd = "cd /d `"$frontendDir`" && ${apiEnvPrefix}npx next dev -p $Port -H 0.0.0.0 > `"$logFile`" 2>&1"
     Start-Process cmd -ArgumentList "/c", $startCmd -WindowStyle Hidden
 
     Write-Host "Starting dev server on port $Port..."
