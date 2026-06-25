@@ -264,10 +264,11 @@ $titleLine
 
 $workType
 
-## 1. Orient
-1. Read ``CLAUDE.md`` (and any ``*/CLAUDE.md``) for project rules.
-2. Confirm location: ``git branch --show-current`` should print ``$Branch`` and ``pwd`` should be this worktree.
-3. Explore the relevant code before writing anything (use the Explore agent or read files directly).
+## 1. Orient (create your task list FIRST)
+1. **Before anything else, create your task list with $taskTool — this is your FIRST action.** Do NOT defer it until "the plan is settled." Seed it now with the high-level steps and refine as you learn: orient + explore, map the data flow, settle the plan, build (per lane), test, open the PR. Exploration is WORK — track it with a task ``in_progress``; do NOT run a long grep/read phase with no list "because no code is written yet" (that is the #1 way workers drift).
+2. Read ``CLAUDE.md`` (and any ``*/CLAUDE.md``) for project rules.
+3. Confirm location: ``git branch --show-current`` should print ``$Branch`` and ``pwd`` should be this worktree.
+4. Explore the relevant code before writing anything (use the Explore agent or read files directly) — with the explore task ``in_progress``.
 
 ## VERIFY the API before you build it - NEVER from memory
 Before writing code against ANY framework / library / SDK / external service (Mastra, CATS, Multilead/Skylead, Unipile, Twilio, Supabase, Vercel AI SDK, shadcn, etc.), CONSULT its authoritative reference FIRST - its MCP docs server, its skill, or its installed docs (``node_modules/<pkg>/dist/docs``, or a ``.claude/skills/<name>``). Your training knowledge of these APIs is almost certainly STALE. Do NOT guess signatures, option names, import paths, or types.
@@ -286,12 +287,12 @@ $dataflow
 ## 4. Plan first (do NOT write code yet)
 List every file you will create or modify and what each change does. Each change must trace back to an entity/flow in the data-flow map above. Identify conflicts/risks. Stay focused on THIS task; if you find unrelated bugs, log them as separate GitHub issues — do not pivot.
 
-### MANDATORY: keep a task list the WHOLE build (this is how you stay on track)
-The moment your plan is settled, turn it into a tracked task list using $taskTool — one item per concrete step — BEFORE you write code. Then maintain it the entire build:
+### MANDATORY: keep the task list current the WHOLE build (this is how you stay on track)
+You already created the seed list in step 1. As the plan firms, REFINE it into concrete per-file build steps — one item per step. Then maintain it the entire build:
 - Exactly ONE task ``in_progress`` at a time; flip it to ``completed`` the instant it's done.
 - Add new tasks as they surface (a missing dependency, a follow-up, a test to write) instead of holding them in your head.
 - Re-read the list whenever you finish a step to pick the next one.
-This is NOT optional and NOT just for big tasks — on a long autonomous run the task list is the only thing that keeps you from dropping steps or drifting. Never build without a current task list.
+There is NO phase without a current task list — exploration and planning included. "I haven't written code yet" is NOT a reason to skip it. On a long autonomous run the task list is the only thing that keeps you from dropping steps or drifting.
 
 $teams
 
@@ -299,12 +300,36 @@ $teams
 Claude Code itself, the orchestrator, the reviewer, and EVERY other worktree's dev server ALL run as ``node.exe``. A name-based or blanket kill therefore takes down the whole crew **and your own session** — this is the #1 way a worker accidentally kills everything.
 
 - FORBIDDEN — never run any of these (they kill Claude Code): ``taskkill /IM node.exe``, ``taskkill /F /IM node``, ``Get-Process node | Stop-Process``, ``Stop-Process -Name node``, ``killall node``, ``pkill node``, or a blanket ``npx kill-port`` sweep across ports.
-- Start / stop / check YOUR dev server ONLY via the script (it is scoped to a single PID on the configured port, never a name sweep):
+
+### To verify in a real browser (Playwright): start THROWAWAY servers on free ports
+Pick the case that matches YOUR task. In both, servers bind auto-picked FREE ports ABOVE the main ones (3001+/8001+), never the main 3000/8000, and MUST be stopped before the PR.
+
+**Case A — frontend-only change (API contract unchanged):** share the main checkout's running backend (``http://localhost:8000``). Do NOT start your own backend. Start only a throwaway frontend with ``-AutoPort``:
 ``````
-pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start  -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
-pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action status -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
-pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop   -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+# read the AUTO_PORT / URL it prints, point Playwright at it
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start -AutoPort -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+# tear down when done (pass the SAME port it printed):
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop -Port <fe port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
 ``````
+
+**Case B — your task CHANGES the backend:** the shared :8000 is the MAIN checkout's OLD code and can't serve your new endpoints/content, and you can't bind :8000. Run THIS branch's backend on its own free port, then point the frontend at it. The backend runner reuses the main venv and runs WITHOUT --reload (one process; --reload spawns children that crash/pile up):
+``````
+# 1. start the branch backend on a free port (8001, 8002, ...) — read its PORT
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/backend-server.ps1" -Action start -AutoPort -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+# 2. start the frontend pointed at YOUR backend (NOT shared :8000) via a runtime env override
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start -AutoPort -ApiUrl http://localhost:<be port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+# ... verify in Playwright against the frontend URL ...
+# 3. tear DOWN BOTH (backend first), passing the ports they printed:
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/backend-server.ps1" -Action stop -Port <be port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop -Port <fe port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+``````
+
+**Hard rules for throwaway servers (this is how the machine stays alive):**
+- **Always STOP every server you start, before the PR.** Orphaned ``next``/``uvicorn`` processes pile up and will fry the box. Never leave one running "to be safe".
+- **One of each, max.** Don't start a second frontend/backend "because the first didn't respond" — check ``-Action status`` first, read the log it points to, then reuse or stop+restart the SAME one.
+- **Never use ``--reload`` or ``python main.py``.** ``--reload`` spawns a child that re-imports the app (crashes on Windows) and respawns endlessly; ``python main.py`` hard-binds :8000. The backend-server script already runs the safe single-process form — use it, don't hand-roll uvicorn.
+- **Never persist a port or URL.** They are runtime flags ONLY. Do NOT write them into ``.env``, ``package.json``, ``next.config.*``, ``vercel.json``, or any committed file, and do NOT change the configured 3000/8000. A changed port/URL in a PR breaks everyone.
+- Without ``-AutoPort`` the scripts bind the CONFIGURED port — use that ONLY in the main checkout, never in a worktree.
 - If ONE specific port is stuck, free ONLY that single PID — never a sweep:
 ``````
 pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1" -Port <port>
