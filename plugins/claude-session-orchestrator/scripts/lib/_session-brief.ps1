@@ -324,6 +324,22 @@ git push -u origin $Branch
 gh pr create --repo $repo --base $base --head $Branch --title "<type>($Name): <descriptive summary>" --body "<summary>.$closes"
 ``````
 
+### Closing keywords: one ``Closes #N`` per issue, on its own line
+If this PR resolves MORE than one issue (a module bundle), the body needs a **separate ``Closes #N`` line for each one**, at the end, each starting with the keyword:
+
+``````
+Closes #404
+Closes #601
+Closes #618
+``````
+
+GitHub only auto-closes on the literal ``Closes #N`` / ``Fixes #N`` / ``Resolves #N`` form. It does NOT parse a prose or list mention, so none of these close anything:
+- ``- **#404** - Profile enhancement`` (a bullet under a ``## Closes`` heading is still just prose)
+- ``Closes #404, #601`` (only the FIRST number is parsed)
+- ``Refs #404``, ``Part of #404``, ``Fixed in this PR: #404``
+
+Use ``Refs #N`` deliberately for an issue this PR touches but does NOT finish (epics, trackers, partial passes) — and say in the body what is left. Getting this wrong is silent: the PR merges, the work ships, and the issue sits open forever with nobody able to tell it is done.
+
 ## 7. Signal completion
 When the PR is open and tests pass, output EXACTLY:
 
