@@ -203,6 +203,18 @@ if ($WorkerCli.clearEnv.Count -gt 0) {
     Start-Sleep -Milliseconds 800
 }
 
+# Then SET env vars (profile.setEnv). For Claude this forces
+# CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1 so the worker actually writes a
+# transcript - without it `restore` cannot `claude --continue` the worker after a
+# crash/reboot and its whole conversation is lost.
+if (($WorkerCli.PSObject.Properties.Name -contains 'setEnv') -and $WorkerCli.setEnv -and $WorkerCli.setEnv.Count -gt 0) {
+    $setLine = ($WorkerCli.setEnv.GetEnumerator() | ForEach-Object { "`$env:$($_.Key)='$($_.Value)'" }) -join '; '
+    psmux send-keys -t $target $setLine
+    Start-Sleep -Milliseconds 400
+    psmux send-keys -t $target Enter
+    Start-Sleep -Milliseconds 800
+}
+
 # Invoke the launcher by BARE path and send Enter SEPARATELY. The call-operator
 # form (& "$cmd" --flag) fractures through send-keys and PowerShell errors.
 psmux send-keys -t $target $launchLine
