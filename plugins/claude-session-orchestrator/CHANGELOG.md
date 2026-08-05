@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `claude-session-orchestrator` are documented here.
+All notable changes to `crew` (directory: `plugins/claude-session-orchestrator`) are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [0.4.2] — 2026-06-23

@@ -10,7 +10,7 @@
   },
   "plugins": [
     {
-      "name": "claude-session-orchestrator",
+      "name": "crew",
       "source": "./plugins/claude-session-orchestrator",
       "description": "Project-agnostic parallel-worktree build pipeline: spawn Claude workers in psmux windows across git worktrees, orchestrate them on Claude Code's native /loop, and review their PRs. Config-driven, no per-project script copies.",
       "author": { "name": "vanman2024", "email": "angelryan17@outlook.com" },

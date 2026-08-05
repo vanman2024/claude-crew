@@ -1,4 +1,4 @@
-# claude-session-orchestrator
+# crew
 
 A **project-agnostic parallel-worktree build pipeline** for Claude Code on Windows.
 Spawn a crew of agent-CLI workers — each in its own git worktree and its own
@@ -73,7 +73,7 @@ psmux SESSION (= config.psmuxSession)
 2. Install the plugin:
 
    ```
-   /plugin install claude-session-orchestrator@claude-crew
+   /plugin install crew@claude-crew
    ```
 
 3. In any project you want to orchestrate, scaffold the config:
