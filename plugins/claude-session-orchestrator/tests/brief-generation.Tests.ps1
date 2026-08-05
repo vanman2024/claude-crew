@@ -31,9 +31,9 @@ Describe "Format-TeamsSection" {
         }
 
         It "renders team names and owned paths" {
-            $script:Section | Should -Match '### Team: frontend'
-            $script:Section | Should -Match '### Team: backend'
-            $script:Section | Should -Match 'Owns paths'
+            $script:Section | Should -Match '### Lane: frontend'
+            $script:Section | Should -Match '### Lane: backend'
+            $script:Section | Should -Match 'owns'
             $script:Section | Should -Match 'frontend/components/\*\*'
         }
 
@@ -166,19 +166,19 @@ Describe "New-WorkerBrief" {
         $brief.Contains('${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1') | Should -BeTrue
     }
 
-    It "mandates a maintained task list, with the CLI-correct tool (Claude: TodoWrite)" {
+    It "mandates a maintained task list, with the CLI-correct tool (Claude: TaskCreate/TaskUpdate)" {
         $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText -WorkerCli 'claude'
-        $brief | Should -Match 'MANDATORY: keep a task list'
-        $brief | Should -Match 'TodoWrite'
+        $brief | Should -Match 'MANDATORY: keep the task list current'
+        $brief | Should -Match 'TaskCreate'
         $brief | Should -Match 'in_progress'
         $brief.Contains('$taskTool') | Should -BeFalse   # variable must interpolate, not leak literally
     }
 
     It "uses Codex's plan tool (update_plan) in a Codex worker's brief" {
         $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText -WorkerCli 'codex'
-        $brief | Should -Match 'MANDATORY: keep a task list'
+        $brief | Should -Match 'MANDATORY: keep the task list current'
         $brief | Should -Match 'update_plan'
-        $brief | Should -Not -Match 'TodoWrite'
+        $brief | Should -Not -Match 'TaskCreate'
     }
 
     It "tells workers to run pwsh with -NoProfile (so the user profile / posh-git can't break the dev server)" {
@@ -292,8 +292,8 @@ Describe "Format-TeamsSection is CLI-aware (Codex must not block on Claude agent
 
     It "codex: keeps file-lanes/path ownership but drops the Claude-agent mandate" {
         $s = Format-TeamsSection -Config (Get-MonorepoConfig) -WorkerCli codex
-        $s | Should -Match '### Team: frontend'
-        $s | Should -Match 'Owns paths'
+        $s | Should -Match '### Lane: frontend'
+        $s | Should -Match 'owns'
         $s | Should -Match 'frontend/components/\*\*'
         # no Claude-only demands that would make Codex block
         $s | Should -Not -Match 'use these exact'
@@ -306,6 +306,6 @@ Describe "Format-TeamsSection is CLI-aware (Codex must not block on Claude agent
     It "New-WorkerBrief -WorkerCli codex produces a non-blocking brief" {
         $brief = New-WorkerBrief -Config (Get-MonorepoConfig) -Name "x" -Branch "fix/x" -Task "do a thing" -WorkerCli codex
         $brief | Should -Not -Match 'print ``BLOCKED: <agent> unavailable``'
-        $brief | Should -Match 'Owns paths'
+        $brief | Should -Match 'owns'
     }
 }
