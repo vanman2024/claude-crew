@@ -43,7 +43,8 @@ Use AskUserQuestion:
 - **root** — single app at the repo root (one `node_modules`, env files at root). Ask for: env files (default `.env`, `.env.local`, `.env.test`), the `node_modules` dir (default `node_modules`), the test command (default `npx tsc --noEmit && pnpm test`), and dev-server port + dir (default port 3000, dir `.`).
 - **monorepo-split** — multiple parts (e.g. `frontend/` + `backend/`). For each part ask: name, path, env files, `nodeModules` path (the parts that have one), optional `pythonVenv`, and `testCmd`. Use `<repo>` in a test command when it must reference the MAIN repo (e.g. a shared venv python: `& '<repo>\backend\.venv\Scripts\python.exe' -m pytest`). Dev-server port + dir (default port 3000, dir = the frontend-ish part path).
 
-Show the two example configs for reference:
+Show the example configs for reference:
+- `${CLAUDE_PLUGIN_ROOT}/examples/session-plugin.nextjs-fastapi.json` — **the proven stack template; start here for Next.js + FastAPI**
 - `${CLAUDE_PLUGIN_ROOT}/examples/session-plugin.monorepo-split.json`
 - `${CLAUDE_PLUGIN_ROOT}/examples/session-plugin.root.json`
 
@@ -68,25 +69,39 @@ Ask whether the project has specialized agents to declare:
 - **If no** specialized agents yet, OMIT the `teams` section — the plugin falls
   back to a generic single-Claude build flow.
 
-To make this concrete, offer the user this fresh-project template (adjust to what
-they actually have installed) — a Next.js + Supabase example:
+**Do not hand-write a roster from memory — start from the proven template:**
 
-```jsonc
-"teams": {
-  "frontend": {
-    "ownsPaths": ["app/**", "components/**", "lib/**", "hooks/**"],
-    "agents": [
-      "nextjs-frontend:component-builder-agent",
-      "nextjs-frontend:page-generator-agent",
-      "nextjs-frontend:api-route-generator-agent",
-      "nextjs-frontend:supabase-integration-agent"
-    ],
-    "skills": ["frontend-design", "nextjs-frontend:design-system-enforcement"]
-  },
-  "data":    { "ownsPaths": ["supabase/migrations/**"], "agents": ["fastapi-backend:database-architect-agent"] },
-  "testing": { "agents": ["frontend-test-generator", "code-validator"] }
-}
 ```
+${CLAUDE_PLUGIN_ROOT}/examples/session-plugin.nextjs-fastapi.json
+```
+
+Read it and adapt it. It is the Next.js + FastAPI stack with the frontend / backend /
+testing / review lanes already correct, and it encodes things that are easy to get
+wrong from memory:
+
+- **Exact namespaced names.** `testing:frontend-test-generator`, not the bare name.
+  `frontend-design:frontend-design` (the built-in Claude Code skill), NOT the bare
+  `frontend-design` (an older local copy under `~/.claude/skills`).
+- **Per-entry `owns` / `when`.** A flat list of names gets cherry-picked; the agent
+  that owns the frontend<->backend seam has to be *named as owning it* or a worker will
+  build both lanes and never connect them.
+- **Size gating via `requiredFrom`.** `required: true` means every task, however small.
+  `requiredFrom: "M"` means only once the task spans 2+ lanes or changes a contract.
+  Without this a one-line fix pulls the whole roster.
+- **`phase`** — `before` (default for skills), `build` (default for agents), `after`,
+  and `post-pr` for reviewers that operate on the PR itself.
+
+**VERIFY EVERY NAME BEFORE WRITING IT.** `teams` names agents; it does not install
+them. A name that does not resolve makes the worker print `BLOCKED: <agent>
+unavailable` — or worse, silently do nothing. Check each one:
+
+```bash
+ls ~/.claude/plugins/cache/*/*/*/agents/ 2>/dev/null      # installed agents
+ls ~/.claude/skills/ 2>/dev/null                          # user-level skills
+claude plugin list                                        # installed plugins
+```
+
+Drop anything you cannot find, and tell the user what you dropped.
 
 ## Step 4 — Data-flow map (ask, optional)
 
@@ -117,13 +132,36 @@ as a top-level `dataFlow` — a plain string, or an object with `entities` / `fl
 Keep it to a 60-second outline (entities, source, destination, what changes) — not a
 giant architecture doc. It can be hand-edited in the config any time.
 
+## Step 4b — Browser verification + docs (ask, optional)
+
+**`browserVerify`** — how a worker proves a user-visible change actually works. Without
+it, "the tests pass" is the only evidence a worker ever produces, and a page that
+silently renders mock data on a failed API call looks identical to success. Ask which
+browser tool this project uses and capture it as `steps` (a tool/skill-driven flow, e.g.
+`/claude-in-chrome`) or `recipe` (shell lines, e.g. a headless CLI). See the template.
+Omit the block and workers still get the mandate, just without project-specific commands.
+
+**`docs`** — inspect the repo before asking:
+
+```bash
+ls docs specs 2>/dev/null; ls *.md
+```
+
+- **Docs exist** → capture the ones that go stale as `keyDocs` (globs are fine), so a
+  worker that renames an endpoint fixes the doc describing it in the same PR. If the
+  project has a docs skill it runs on a loop, record it as `syncSkill`.
+- **No docs** → OMIT the block. Workers are then told to update only what already
+  exists and create nothing — which is what you want. Do NOT scaffold a docs tree for
+  a project that has none; inventing `docs/architecture/` in a repo that never had one
+  just makes work for a human to delete later.
+
 ## Step 5 — Write the config
 
 Write `<repoPath>\.claude\session-plugin.json` (create `.claude` if needed) with
 exactly the schema shown in the examples. Required top-level keys:
 `projectName, repoPath, worktreesPath, psmuxSession, githubRepo, defaultBranch,
-workerCmdPath, layout`. Optional: `devServer`, `teams`, `dataFlow`, `review`, `workerCli`,
-`worktreeDeps`.
+workerCmdPath, layout`. Optional: `devServer`, `teams`, `dataFlow`, `docs`, `browserVerify`, `review`,
+`workerCli`, `worktreeDeps`.
 
 > `worktreeDeps` (optional) controls how each worker worktree gets its `node_modules`:
 > `"junction"` (default) shares the main checkout's `node_modules` via a junction — fast and

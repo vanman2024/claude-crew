@@ -1,0 +1,123 @@
+{
+  "//": "Next.js + FastAPI monorepo — the proven stack template. Copy, then replace every <PLACEHOLDER>.",
+  "//roster": "Agent/skill entries may be a bare string (name only) OR an object with owns / when / phase / required / requiredFrom. Only list agents that are ACTUALLY INSTALLED — naming a missing one makes the worker print BLOCKED and stop.",
+  "//sizing": "required=true means every size. requiredFrom:'M' means only once the task spans 2+ lanes or changes a contract. This is what stops a one-line fix pulling the whole roster.",
+
+  "projectName": "<ProjectName>",
+  "repoPath": "C:\\Users\\<you>\\Projects\\<ProjectName>",
+  "worktreesPath": "C:\\Users\\<you>\\Projects\\<ProjectName>-worktrees",
+  "psmuxSession": "<projectname>",
+  "githubRepo": "<owner>/<ProjectName>",
+  "defaultBranch": "main",
+  "workerCmdPath": "C:\\Users\\<you>\\AppData\\Roaming\\npm\\claude.cmd",
+  "worktreeDeps": "install",
+
+  "devServer": { "port": 3000, "dir": "frontend" },
+
+  "browserVerify": {
+    "//": "How a worker VERIFIES a user-visible change. Declare `steps` for a tool/skill-driven flow, or `recipe` for shell lines. Omit the whole block and workers get the mandate with no invented commands.",
+    "tool": "Claude in Chrome (`/claude-in-chrome`)",
+    "required": true,
+    "steps": [
+      "Invoke the `/claude-in-chrome` skill. It handles the browser tooling — you do not need to load or name any MCP tool yourself.",
+      "Open {url} in a NEW tab — never take over a tab that is already open.",
+      "Read the page: are the values REAL, or still placeholder / mock / zero?",
+      "**Check the network requests — this is the one that matters.** A 4xx/5xx on a page that still renders numbers means a silent fallback is masking a broken call.",
+      "Check the console for errors.",
+      "Take a screenshot for the PR body."
+    ]
+  },
+
+  "docs": {
+    "//": "Keeps docs true as code lands. `keyDocs` are the ones a worker must update when it changes a documented surface; `syncSkill` is an optional project skill run by a dedicated docs terminal on a loop. Omit this block entirely if the project has no docs yet — workers are then told to infer structure from the code and NOT to invent a docs tree.",
+    "keyDocs": ["README.md", "docs/architecture/**", "docs/api/**"],
+    "syncSkill": "docs-sync",
+    "intervalHours": 4
+  },
+
+  "layout": {
+    "type": "monorepo-split",
+    "parts": [
+      {
+        "name": "frontend",
+        "path": "frontend",
+        "envFiles": [".env.local", ".env.test"],
+        "nodeModules": "frontend/node_modules",
+        "testCmd": "cd frontend && npx tsc --noEmit && pnpm test"
+      },
+      {
+        "name": "backend",
+        "path": "backend",
+        "envFiles": [".env"],
+        "pythonVenv": ".venv",
+        "testCmd": "& '<repo>\\backend\\.venv\\Scripts\\python.exe' -m pytest"
+      }
+    ]
+  },
+
+  "teams": {
+    "frontend": {
+      "ownsPaths": ["frontend/components/**", "frontend/app/**", "frontend/lib/**", "frontend/hooks/**"],
+      "agents": [
+        { "name": "nextjs-frontend:component-builder-agent", "owns": "frontend/components/**", "when": "if components change" },
+        { "name": "nextjs-frontend:page-generator-agent", "owns": "frontend/app/**/page.tsx", "when": "if pages change" },
+        { "name": "nextjs-frontend:api-route-generator-agent", "owns": "frontend/app/api/**/route.ts", "requiredFrom": "M",
+          "when": "the frontend<->backend seam. A built frontend and a built backend that do not talk to each other is an INCOMPLETE task" },
+        { "name": "nextjs-frontend:supabase-integration-agent", "owns": "the data-access / query layer", "when": "if queries or data access change" },
+        { "name": "nextjs-frontend:design-enforcer-agent", "owns": "design-system conformance", "when": "if new UI was generated" }
+      ],
+      "skills": [
+        { "name": "frontend-design:frontend-design", "requiredFrom": "L",
+          "when": "ANY UI work. NOTE the plugin namespace — the bare `frontend-design` is a different, older copy" },
+        { "name": "dataviz", "requiredFrom": "M", "when": "BEFORE writing any chart, graph, stat tile, KPI row, or dashboard layout" },
+        { "name": "ui-ux-pro-max", "when": "choosing style, palette, or font pairing for new surfaces" },
+        { "name": "vercel-react-best-practices", "when": "performance-sensitive React/Next work" },
+        { "name": "nextjs-frontend:design-system-enforcement", "requiredFrom": "M", "phase": "after",
+          "when": "validate every generated surface against the design schema before commit" },
+        { "name": "web-design-guidelines", "phase": "after", "when": "accessibility / UX audit of the built UI" }
+      ]
+    },
+    "backend": {
+      "ownsPaths": ["backend/api/routes/**", "backend/services/**", "backend/models/**"],
+      "agents": [
+        { "name": "fastapi-backend:endpoint-generator-agent", "owns": "backend/api/routes/**", "when": "if endpoints change" },
+        { "name": "fastapi-backend:database-architect-agent", "owns": "backend/models/** + migrations", "when": "if the schema or data model changes" }
+      ]
+    },
+    "testing": {
+      "agents": [
+        { "name": "testing:frontend-test-generator", "owns": "frontend/**/*.test.tsx", "when": "after frontend surfaces are built" },
+        { "name": "testing:test-generator", "owns": "backend/tests/**", "when": "if backend endpoints, services, or models changed" },
+        { "name": "testing:test-runner", "required": true, "when": "run the scoped suites for every lane you touched, before the PR" }
+      ],
+      "skills": [
+        { "name": "testing:api-contract-testing", "requiredFrom": "M", "phase": "after",
+          "when": "the seam check: backend model == route handler == frontend fetch type. No `any`, no dead endpoints, no fabricated fallback" },
+        { "name": "testing:playwright-e2e", "phase": "after", "when": "user-visible flows that span frontend and backend" },
+        { "name": "testing:smoke-testing", "phase": "after", "when": "quick post-build sanity pass before the PR" }
+      ]
+    },
+    "review": {
+      "agents": [
+        { "name": "security:security-scanner", "phase": "after",
+          "when": "if the change touches auth, secrets, user input, payments, or external API calls" }
+      ],
+      "skills": [
+        { "name": "review", "required": true, "phase": "after", "when": "pre-landing review of your full diff, immediately BEFORE you open the PR" },
+        { "name": "codex", "phase": "after", "when": "cross-model second opinion via `codex review` — a different model catches what this one rationalized" },
+        { "name": "simplify", "phase": "after", "when": "quality pass: reuse, duplication, dead code. NOT a bug hunt" },
+        { "name": "code-review:code-review", "requiredFrom": "M", "phase": "post-pr",
+          "when": "once the PR is open — 5 parallel reviewers, confidence-scored. Fix anything scored 75+" }
+      ]
+    }
+  },
+
+  "dataFlow": {
+    "//": "The single strongest lever against parallel lanes inventing competing versions of the same entity. Replace with THIS project's real entities and flows.",
+    "entities": ["<Entity1>", "<Entity2>"],
+    "flows": ["<Entity1> does X -> <Entity2> updated"],
+    "notes": "<invariants — who is allowed to write what>"
+  },
+
+  "review": { "intervalMin": 5 }
+}
