@@ -172,15 +172,27 @@ psmux new-window -t $Session -n $Name -c $WtPath
 # clearEnv, launch args, and the accept/ready capture-pane patterns. Nothing here
 # is hardcoded to a particular CLI. See Get-WorkerCliProfile in _session-config.ps1.
 
-# Clear inherited env vars (profile.clearEnv) then launch the CLI by BARE path.
-# For Claude clearEnv nulls CLAUDECODE/CLAUDE_CODE_ENTRYPOINT so the worker isn't
-# treated as a nested sub-agent (which would disable its Task tool). Enter is sent
-# SEPARATELY - the call-operator form (& "$cmd" --flag) fractures through send-keys.
+# Clear inherited env vars (profile.clearEnv), SET the required ones (profile.setEnv),
+# then launch the CLI by BARE path. For Claude clearEnv nulls CLAUDECODE /
+# CLAUDE_CODE_ENTRYPOINT so the worker isn't treated as a nested sub-agent (which
+# would disable its Task tool), and CLAUDE_CODE_CHILD_SESSION because inheriting that
+# marker silently turns transcript saving OFF. Enter is sent SEPARATELY - the
+# call-operator form (& "$cmd" --flag) fractures through send-keys.
 function Send-WorkerLaunch {
     param([string]$Target, $Cli, [string]$LaunchLine)
     if ($Cli.clearEnv.Count -gt 0) {
         $clearLine = ($Cli.clearEnv | ForEach-Object { "`$env:$_=`$null" }) -join '; '
         psmux send-keys -t $Target $clearLine
+        Start-Sleep -Milliseconds 400
+        psmux send-keys -t $Target Enter
+        Start-Sleep -Milliseconds 800
+    }
+    # Clearing the child marker is not enough on its own - persistence must also be
+    # forced, or the worker writes no transcript and -Continue has nothing to resume.
+    # This lives INSIDE Send-WorkerLaunch so a resume relaunch gets it too.
+    if (($Cli.PSObject.Properties.Name -contains 'setEnv') -and $Cli.setEnv -and $Cli.setEnv.Count -gt 0) {
+        $setLine = ($Cli.setEnv.GetEnumerator() | ForEach-Object { "`$env:$($_.Key)='$($_.Value)'" }) -join '; '
+        psmux send-keys -t $Target $setLine
         Start-Sleep -Milliseconds 400
         psmux send-keys -t $Target Enter
         Start-Sleep -Milliseconds 800
@@ -296,7 +308,10 @@ if ($Continue -and $NoNudge -and -not $resumedFresh) {
     psmux send-keys -t $target "Your terminal was interrupted (crash / power loss / reboot) and this session was just resumed. Re-check git status and your last few steps to see what already landed, then CONTINUE your task straight through to a PR. Do not restart from scratch or redo finished work." Enter
 } else {
     Step "Sending bootstrap message"
-    psmux send-keys -t $target "Read .claude-bootstrap.md in this worktree root and follow it exactly. Your FIRST action, before exploring or writing code, is to create your task list with TodoWrite (seed it with explore/plan/build/test/PR and refine as you go) - do not run a long exploration phase without one. You are autonomous: build straight through to a PR; do not stop to ask for permission." Enter
+    # Name the CLI's REAL task tool - a worker told to use a tool it does not have burns
+    # its first turn discovering that and re-planning.
+    $taskToolPlain = Get-TaskToolName -WorkerCli $WorkerCli.name -Plain
+    psmux send-keys -t $target "Read .claude-bootstrap.md in this worktree root and follow it exactly. Your FIRST action, before exploring or writing code, is to create your task list with $taskToolPlain (seed it with explore/plan/build/test/PR and refine as you go) - do not run a long exploration phase without one. You are autonomous: build straight through to a PR; do not stop to ask for permission." Enter
 }
 
 # A long paste can absorb its own trailing Enter into the input box instead of

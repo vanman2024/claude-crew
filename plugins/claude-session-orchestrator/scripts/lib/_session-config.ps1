@@ -467,6 +467,10 @@ function Get-CodexCmd {
 #   cmd            : launch command (falls back to config.workerCmdPath)
 #   args           : launch args (string[])
 #   clearEnv       : env vars to null in the pane before launch (string[])
+#   setEnv         : env vars to SET in the pane before launch (hashtable).
+#                    Claude needs CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1 or the
+#                    worker writes NO transcript, which makes `restore` unable to
+#                    `claude --continue` it after a crash/reboot.
 #   acceptMatchAny : substrings that signal a first-run accept screen (matched
 #                    against the pane text with ALL whitespace removed)
 #   acceptSend     : key/string to send when an accept pattern matches
@@ -484,7 +488,11 @@ function Get-WorkerCliPreset {
             [pscustomobject]@{
                 name = 'claude'; cmd = $null
                 args = @('--dangerously-skip-permissions')
-                clearEnv = @('CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT')
+                # CLAUDE_CODE_CHILD_SESSION must be cleared AND persistence forced:
+                # inheriting the child marker silently disables transcript saving, so
+                # the worker cannot be resumed with `claude --continue` later.
+                clearEnv = @('CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION')
+                setEnv = @{ CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1' }
                 acceptMatchAny = @('Yes,Iaccept', 'No,exit'); acceptSend = '2'
                 readyMatchAny = @('bypasspermissionson'); bootWaitSec = 12
             }
@@ -499,7 +507,7 @@ function Get-WorkerCliPreset {
             [pscustomobject]@{
                 name = 'codex'; cmd = $null
                 args = @('--dangerously-bypass-approvals-and-sandbox', '--no-alt-screen')
-                clearEnv = @()
+                clearEnv = @(); setEnv = @{}
                 acceptMatchAny = @('Doyoutrustthecontents', 'Yes,continue'); acceptSend = '1'
                 readyMatchAny = @('permissions:YOLOmode', '>_OpenAICodex'); bootWaitSec = 15
             }
@@ -507,7 +515,7 @@ function Get-WorkerCliPreset {
         'generic' {
             [pscustomobject]@{
                 name = 'generic'; cmd = $null
-                args = @(); clearEnv = @()
+                args = @(); clearEnv = @(); setEnv = @{}
                 acceptMatchAny = @(); acceptSend = ''
                 readyMatchAny = @(); bootWaitSec = 10
             }
@@ -519,7 +527,7 @@ function Get-WorkerCliPreset {
 # Resolve the effective worker-CLI profile from config.workerCli, which may be:
 #   - absent          -> 'claude' preset
 #   - a string        -> that preset name ('claude' | 'codex' | 'generic')
-#   - an object       -> { preset?, cmd?, args?, clearEnv?, bootWaitSec?,
+#   - an object       -> { preset?, cmd?, args?, clearEnv?, setEnv?, bootWaitSec?,
 #                          accept{matchAny?,send?}, ready{matchAny?} } extending a preset
 # cmd falls back to config.workerCmdPath.
 function Get-WorkerCliProfile {
@@ -548,6 +556,11 @@ function Get-WorkerCliProfile {
         if (($override.PSObject.Properties.Name -contains 'cmd') -and $override.cmd) { $profile.cmd = $override.cmd }
         if ($override.PSObject.Properties.Name -contains 'args') { $profile.args = @($override.args) }
         if ($override.PSObject.Properties.Name -contains 'clearEnv') { $profile.clearEnv = @($override.clearEnv) }
+        if ($override.PSObject.Properties.Name -contains 'setEnv') {
+            $se = @{}
+            foreach ($p in $override.setEnv.PSObject.Properties) { $se[$p.Name] = [string]$p.Value }
+            $profile.setEnv = $se
+        }
         if (($override.PSObject.Properties.Name -contains 'bootWaitSec') -and $override.bootWaitSec) { $profile.bootWaitSec = [int]$override.bootWaitSec }
         if ($override.PSObject.Properties.Name -contains 'accept') {
             $acc = $override.accept
