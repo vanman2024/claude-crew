@@ -72,21 +72,35 @@ try {
     }
 } catch { Write-Warning "[close-worker] worktree process sweep skipped: $($_.Exception.Message)" }
 
-# 1. Detach EVERY node_modules junction FIRST (link only, main checkout untouched).
+# 1. Deal with node_modules FIRST, per the project's worktreeDeps mode.
+#
+#   junction mode - the dir is a LINK into the main checkout. It MUST be detached with
+#     rmdir (link only) before `git worktree remove`, which would otherwise follow the
+#     link and delete the MAIN checkout's node_modules.
+#   install mode  - the dir is a REAL per-worktree install. There is no link to follow
+#     and nothing shared, so it goes with the worktree. A real dir here is EXPECTED.
+#
+# A real directory while in junction mode is still a hard stop: that is the shape that
+# means something is not what the config says it is, and guessing costs the main checkout.
+$depsMode = Get-WorktreeDepsMode -Config $cfg
 foreach ($rel in (Get-NodeModuleMappings -Config $cfg)) {
-    $junction = Join-Path $WtPath $rel
-    if (Test-Path $junction) {
-        $item = Get-Item $junction -Force
-        $isReparse = ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
-        if ($isReparse) {
-            Write-Host "[close-worker] Detaching '$rel' junction (link only, main checkout untouched)"
-            cmd /c rmdir $junction
-        } else {
-            Write-Warning "[close-worker] $junction is a REAL directory, not a junction. Refusing to remove (would destroy real files). Investigate manually."
-            exit 1
-        }
+    $nm = Join-Path $WtPath $rel
+    if (-not (Test-Path $nm)) {
+        Write-Host "[close-worker] No '$rel' to handle (already gone or never created)"
+        continue
+    }
+    $item = Get-Item $nm -Force
+    $isReparse = ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+
+    if ($isReparse) {
+        # Always detach a link, whatever the mode - it is never safe to recurse into one.
+        Write-Host "[close-worker] Detaching '$rel' junction (link only, main checkout untouched)"
+        cmd /c rmdir $nm
+    } elseif ($depsMode -eq 'install') {
+        Write-Host "[close-worker] '$rel' is a real per-worktree install (worktreeDeps=install) - removing with the worktree"
     } else {
-        Write-Host "[close-worker] No '$rel' junction to detach (already gone or never created)"
+        Write-Warning "[close-worker] $nm is a REAL directory but this project is worktreeDeps='$depsMode' (expected a junction). Refusing to remove - if this worktree really has its own install, set worktreeDeps='install' in the config. Investigate manually."
+        exit 1
     }
 }
 
