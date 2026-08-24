@@ -93,6 +93,21 @@ function Get-ProcessCommandLine {
     return ""
 }
 
+# Does this process actually belong to the worktree we are operating on?
+#
+# The only safe basis for killing something is where it was started from, never
+# what it is called. `node` is the main checkout's dev server, every other
+# worktree's dev server, and Claude Code itself -- so a name check kills the
+# session issuing the command. This repository has already shipped that bug once
+# (PR #4, "never name-kill node in the build protocol"); this is the same rule
+# applied to the server scripts.
+function Test-OwnedByThisWorktree {
+    param([int]$ProcessId, [string]$OwnerDir)
+    $cmd = Get-ProcessCommandLine -ProcessId $ProcessId
+    if (-not $cmd) { return $false }
+    return ($cmd -like "*$OwnerDir*")
+}
+
 function Get-ChildProcesses {
     param([int]$ParentProcessId)
     try {
@@ -116,14 +131,17 @@ if ($Action -eq "start") {
             Write-Host "PID=$existingPid"
             exit 0
         } else {
-            # Something else is on the port — kill if it's a stale node process
+            # Something else is on the port. Kill it ONLY if it was started from
+            # this worktree -- see Test-OwnedByThisWorktree. The previous rule
+            # here was `if ($procName -eq "node")`, which happily killed the main
+            # checkout's dev server, another worktree's server, or Claude Code.
             $procName = (Get-Process -Id $existingPid -ErrorAction SilentlyContinue).ProcessName
-            if ($procName -eq "node") {
-                Write-Host "Killing stale node process on port $Port (PID $existingPid)..."
+            if (Test-OwnedByThisWorktree -ProcessId $existingPid -OwnerDir $frontendDir) {
+                Write-Host "Killing stale $procName from this worktree on port $Port (PID $existingPid)..."
                 Stop-Process -Id $existingPid -Force -ErrorAction SilentlyContinue
                 Start-Sleep -Seconds 1
             } else {
-                Write-Error "Port $Port is in use by $procName (PID $existingPid). Cannot start dev server."
+                Write-Error "Port $Port is held by $procName (PID $existingPid), which was NOT started from $frontendDir. Refusing to kill it - it is probably your main checkout's dev server, another worktree's, or Claude Code itself. Start on a free port with -AutoPort, or pass an explicit -Port."
                 exit 1
             }
         }
@@ -203,6 +221,15 @@ if ($Action -eq "stop") {
         Write-Host "DEV_SERVER_NOT_RUNNING"
         Write-Host "PORT=$Port"
         exit 0
+    }
+
+    # A stop is still a kill, and -Port is easy to get wrong: passing the main
+    # checkout's port here would take down the server you are working against,
+    # from a worktree, with no warning. Same ownership rule as start.
+    if (-not (Test-OwnedByThisWorktree -ProcessId $existingPid -OwnerDir $frontendDir)) {
+        $procName = (Get-Process -Id $existingPid -ErrorAction SilentlyContinue).ProcessName
+        Write-Error "Port $Port is held by $procName (PID $existingPid), which was NOT started from $frontendDir. Refusing to stop it - pass the -Port that this worktree's start step printed."
+        exit 1
     }
 
     # Kill child processes first, then parent

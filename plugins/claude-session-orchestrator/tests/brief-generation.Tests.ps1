@@ -200,7 +200,11 @@ Describe "New-WorkerBrief" {
 
     It "omits the Closes line when no -IssueNumber" {
         $brief = New-WorkerBrief -Config $script:Cfg -Name "pw-reset" -Branch "feat/pw-reset" -Task $script:TaskText
-        $brief | Should -Not -Match 'Closes #'
+        # Match the EMITTED directive, not the string "Closes #" anywhere in the
+        # brief. The closing-keywords guidance quotes `Closes #404` as an example,
+        # so a bare -Not -Match 'Closes #' fails on documentation rather than on
+        # behaviour -- which is exactly what it did once that guidance was added.
+        $brief | Should -Not -Match '--body "<summary>\. Closes #'
     }
 
     It "includes the project name and a title line when -Title given" {
