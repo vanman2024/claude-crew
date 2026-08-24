@@ -47,6 +47,44 @@ decisions:
       running the 126 Pester tests. That workflow, not board automation, is what
       should become the required check. PROJECT_URL is set; PROJECT_TOKEN is
       still absent, so board automation will not run.
+  - decision: >-
+      Board state is updated by running `devctl github project seed`, not by the
+      project-automation workflow.
+    why: >-
+      The workflow needs a PROJECT_TOKEN secret, because GITHUB_TOKEN has no
+      `project` scope and cannot be granted one. A repo secret is readable by
+      every workflow run in the repository, so a long-lived project-scoped PAT
+      copied into repo settings is a standing exposure in exchange for a
+      convenience. The local `gh` credential already carries the scope, so
+      seeding from a machine costs nothing and stores no secret.
+    open_risk: >-
+      The board is only true as of the last seed. Run it after creating issues.
+      `.github/workflows/project-automation.yml` remains in the repository,
+      inert, so this can be switched on later by setting the secret.
+
+  - decision: >-
+      No documented single command that starts every runtime, and none is
+      applicable.
+    why: >-
+      Crew has no runtime of its own to start. It is a Claude Code plugin whose
+      entry points are skills, invoked inside a session, and whose scripts drive
+      psmux and git in the consuming project. `devctl scaffold --only delivery`
+      confirms this from the other direction: every delivery artifact it knows
+      about is marked "not a cli-library concern", so the remedy `health`
+      suggests copies nothing.
+    open_risk: >-
+      `devctl health` will keep reporting this as missing.
+
+  - decision: PRODUCT.md is the product record; there is no specs/product-brief.md.
+    why: >-
+      The PRODUCT.md template states that it was extracted from product-brief.md
+      and module-registry.md precisely so one canonical artifact replaces two
+      that drift. Writing a second document describing the same product would
+      recreate the problem PRODUCT.md exists to solve.
+    open_risk: >-
+      `devctl health` asks for specs/product-brief.md separately and will keep
+      reporting it missing.
+
   - decision: No .env.example, deliberately.
     why: >-
       Crew consumes no user-supplied environment variable. The only four in the
