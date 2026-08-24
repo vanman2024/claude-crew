@@ -1,0 +1,84 @@
+# The 126 Pester tests, run on every push and pull request.
+#
+# WHY THIS EXISTS
+#
+# The suite was already here and already passing, and nothing ran it. Eight pull
+# requests merged with no automated verification, because the tests only
+# protected whoever remembered to type `Invoke-Pester`. Tests nothing enforces
+# are documentation.
+#
+# WHY WINDOWS ONLY, AND NOT A MATRIX
+#
+# The cli-library profile asks for a cross-platform matrix. Crew is deliberately
+# Windows-first -- psmux and PowerShell are the runtime, and that is a stated
+# product decision, not an unbuilt feature. A matrix across ubuntu/macos would
+# test a configuration the product does not claim to support and would fail for
+# reasons that mean nothing. If cross-platform ever becomes a goal, this is the
+# file that grows a matrix.
+#
+# WHY -SkipPublisherCheck
+#
+# Windows ships Pester 3.4.0, signed by Microsoft. The gallery's Pester 5.x is
+# signed by a different publisher, so installing over the built-in module fails
+# the publisher check unless it is skipped. This is the single most common
+# reason a Pester workflow fails on a fresh Windows runner.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pester:
+    name: Pester (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Pester 5
+        shell: pwsh
+        run: |
+          $existing = Get-Module -ListAvailable Pester |
+            Where-Object { $_.Version -ge [version]'5.0.0' } |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+
+          if ($existing) {
+            Write-Host "Pester $($existing.Version) already available."
+          } else {
+            Install-Module -Name Pester -MinimumVersion 5.0.0 `
+              -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+
+      - name: Run Pester
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = './plugins/claude-session-orchestrator/tests'
+          # Exit non-zero when a test fails. Without this the step is green
+          # whatever the results say, which is the failure mode this whole
+          # workflow exists to prevent.
+          $config.Run.Exit = $true
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'testResults.xml'
+          $config.TestResult.OutputFormat = 'NUnitXml'
+          $config.Output.Verbosity = 'Detailed'
+
+          Invoke-Pester -Configuration $config
+
+      - name: Upload test results
+        # `always()` so a failing run still publishes the results that explain
+        # why. Uploading only on success hides exactly the run worth reading.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pester-results
+          path: testResults.xml
+          if-no-files-found: warn

@@ -1,0 +1,200 @@
+{
+  "product": "claude-crew",
+  "module": "Foundation",
+  "parent": {
+    "title": "claude-crew foundation",
+    "work_key": "foundation",
+    "type": "Foundation",
+    "labels": [
+      "foundation"
+    ],
+    "body": "Dependency-ordered foundation work, compiled from the capability catalog. Each child is unsafe to start before its blockers are done."
+  },
+  "children": [
+    {
+      "capability": "S08",
+      "title": "Extend Application / API Service Layer",
+      "work_key": "foundation:s08",
+      "type": "Foundation",
+      "labels": [
+        "foundation",
+        "work-package",
+        "extend",
+        "area:domain-and-data"
+      ],
+      "status": "partial",
+      "why": "A real seam exists: two dot-sourced libraries (_session-config.ps1, _session-brief.ps1) are loaded first by every entry script, so config resolution and brief generation are not duplicated per script. What is missing is a contract on that seam - there is no JSON schema for session-plugin.json and no schemaVersion field, so a config written for an older crew fails at whatever line first dereferences a missing key rather than at one validation boundary with a usable message. Open issue #9 pushes substantially more structure through this seam (templates, detected stacks, generated lanes), which makes the absent schema more load-bearing rather than less.",
+      "acceptance": [
+        "service layer",
+        "request validation",
+        "error contracts",
+        "pagination",
+        "idempotency",
+        "one consistent frontend-to-backend communication contract"
+      ],
+      "buckets": [
+        "B8",
+        "B14"
+      ],
+      "blocked_by": []
+    },
+    {
+      "capability": "S38",
+      "title": "Extend Security",
+      "work_key": "foundation:s38",
+      "type": "Foundation",
+      "labels": [
+        "foundation",
+        "work-package",
+        "extend",
+        "area:trust-and-operations"
+      ],
+      "status": "partial",
+      "why": "Credential scanning only arrived with this initialization - the .git/hooks/pre-commit hook did not exist before and was written by devctl scaffold in this run. The more material exposure is unreviewed: these scripts kill processes by port and by name and force-remove directories (kill-port.ps1, kill-worktree-agents.ps1, nuke-worktrees.ps1, force-remove-dir.ps1), all running against paths supplied by project config. This failure class has already fired once in this repo's own history - PR #4, 'never name-kill node in the build protocol (it kills Claude Code itself)'. The missing work is a blast-radius review of the destructive utilities, not more secret scanning.",
+      "acceptance": [
+        "threat model",
+        "encryption",
+        "secrets management",
+        "tenant isolation",
+        "rate limiting",
+        "vulnerability scanning"
+      ],
+      "buckets": [
+        "B18"
+      ],
+      "blocked_by": []
+    },
+    {
+      "capability": "S40",
+      "title": "Extend Reliability & Resilience",
+      "work_key": "foundation:s40",
+      "type": "Foundation",
+      "labels": [
+        "foundation",
+        "work-package",
+        "extend",
+        "area:trust-and-operations"
+      ],
+      "status": "partial",
+      "why": "Genuinely strong for a project this size: restore-session.ps1 plus psmux-dispatch -Continue recover a crashed session with its prior conversation, check-worktree-health.ps1 and check-headless-workers.ps1 detect dead or hung workers, and GIT_REDIRECT_STDERR is assigned once centrally in the shared lib to kill an entire class of dispatch abort. The gap is that recovery is entirely operator-initiated - every one of these is a command a person runs after noticing something is wrong. Nothing detects a failed worker and acts. Worker startup failure is a known standing pain point on this project.",
+      "acceptance": [
+        "SLOs",
+        "retries",
+        "timeouts",
+        "circuit breakers",
+        "backpressure",
+        "graceful degradation"
+      ],
+      "buckets": [
+        "B17",
+        "B12"
+      ],
+      "blocked_by": []
+    },
+    {
+      "capability": "S41",
+      "title": "Extend Observability",
+      "work_key": "foundation:s41",
+      "type": "Foundation",
+      "labels": [
+        "foundation",
+        "work-package",
+        "extend",
+        "area:trust-and-operations"
+      ],
+      "status": "partial",
+      "why": "poll-worktrees.sh with poll-format.js and orchestrator-hook.sh give a live view of what every worker is doing, which is the highest-value observability for this product and it works. The limit is that it is strictly point-in-time polling: no run is recorded, so once a worker dies there is no history of what it was doing, and diagnosing a failed overnight crew depends on psmux scrollback still existing. There is no artifact you can read the morning after.",
+      "acceptance": [
+        "structured logs",
+        "metrics",
+        "traces",
+        "correlation IDs",
+        "alerting",
+        "dashboards"
+      ],
+      "buckets": [
+        "B16"
+      ],
+      "blocked_by": []
+    },
+    {
+      "capability": "S43",
+      "title": "Extend Environments, CI/CD & Delivery",
+      "work_key": "foundation:s43",
+      "type": "Foundation",
+      "labels": [
+        "foundation",
+        "work-package",
+        "extend",
+        "area:trust-and-operations"
+      ],
+      "status": "partial",
+      "why": "The highest-value gap in the repository. 126 Pester tests exist and all 126 pass, but nothing runs them: before this initialization there was no .github/workflows directory at all, and the only workflow present now is the project-automation.yml this run just scaffolded. Every one of the eight merged PRs therefore landed with no automated verification, and the suite protects only the person who remembers to invoke Invoke-Pester by hand. The tests are already written - the delivery step that would make them binding is the missing piece.",
+      "acceptance": [
+        "development",
+        "staging",
+        "production",
+        "ci",
+        "cd"
+      ],
+      "buckets": [
+        "B19",
+        "B14"
+      ],
+      "blocked_by": []
+    },
+    {
+      "capability": "S44",
+      "title": "Extend Testing & Quality Architecture",
+      "work_key": "foundation:s44",
+      "type": "Foundation",
+      "labels": [
+        "foundation",
+        "work-package",
+        "extend",
+        "area:trust-and-operations"
+      ],
+      "status": "partial",
+      "why": "Content is better than typical for a plugin repo and notably well-targeted: 126 tests across five files covering brief generation, config resolution, dispatch script invocation, slug derivation and worker-CLI profiles - which is to say, regression tests written after real failures rather than coverage theatre. Two gaps: no coverage measurement of any kind, and the suite has no automated trigger (see S43). Strong test content, absent test enforcement.",
+      "acceptance": [
+        "unit",
+        "integration",
+        "API",
+        "database",
+        "E2E",
+        "permissions"
+      ],
+      "buckets": [
+        "B19"
+      ],
+      "blocked_by": []
+    },
+    {
+      "capability": "S45",
+      "title": "Extend Releases & Versioning",
+      "work_key": "foundation:s45",
+      "type": "Foundation",
+      "labels": [
+        "foundation",
+        "work-package",
+        "extend",
+        "area:trust-and-operations"
+      ],
+      "status": "partial",
+      "why": "Three sources of truth for one version number and they disagree. CHANGELOG.md documents releases up to 0.4.2 dated 2026-06-23 in disciplined Keep-a-Changelog form across eight or more entries; .claude-plugin/marketplace.json declares version 0.2.2; and the plugin's own plugin.json declares no version field at all. marketplace.json is the one users actually resolve through `/plugin install crew@claude-crew`, so an installer is offered 0.2.2 of a codebase whose changelog calls itself 0.4.2 - two minor versions of documented work that installs cannot see. The changelog discipline is real; the release step that carries a bump into the two manifests does not exist.",
+      "acceptance": [
+        "semantic versioning",
+        "changelog",
+        "release notes",
+        "migration notes",
+        "deprecation policy",
+        "rollback plan"
+      ],
+      "buckets": [
+        "B19",
+        "B8"
+      ],
+      "blocked_by": []
+    }
+  ]
+}

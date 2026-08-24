@@ -1,0 +1,83 @@
+# What this project is. Deliberately small.
+#
+# It replaces the projects, project_profiles and environments tables of
+# the Product Graph, and it must never grow into a universal project
+# model -- that is the same store with a different file extension.
+# Anything derivable from code belongs to CRG; anything about work in
+# flight belongs to GitHub.
+
+name: claude-crew
+profile: cli-library
+confirmed_by_user: true
+surfaces:
+  - cli
+
+default_branch: main
+
+# How work is tracked. `devctl github project recommend` proposes this
+# from the profile and what the repository already looks like; a person
+# confirms it. `none` is a legitimate answer and is never chosen for
+# you -- but with nothing to reconcile against, the gate that stops a
+# second implementation of something that exists cannot run.
+#
+#   github-projects   issues, a board, fields, views, milestones, dates
+#   issues-only       issues, PRs, labels, milestones -- no board
+#   none              an explicit opt-out
+project_management:
+  mode: github-projects
+  provider: github
+  owner: vanman2024
+  # No Project node id, no field ids, no issue state. Those are live,
+  # and a stored copy of a discoverable thing is a thing somebody has
+  # to keep current.
+
+decisions:
+  - decision: >-
+      `main` is protected against force-push and deletion, but gates on no
+      status check and no approving review.
+    why: >-
+      Initialization first required the `add` and `status` jobs from
+      project-automation.yml plus one approving review. Neither job can pass --
+      they need a PROJECT_TOKEN secret that does not exist -- and a single
+      maintainer cannot approve their own pull request, so every PR was blocked
+      by gates that prove nothing. A gate that is always overridden teaches
+      people to override gates.
+    open_risk: >-
+      There is no automated check on merge until S43 (issue #15) adds a workflow
+      running the 126 Pester tests. That workflow, not board automation, is what
+      should become the required check. PROJECT_URL is set; PROJECT_TOKEN is
+      still absent, so board automation will not run.
+  - decision: No .env.example, deliberately.
+    why: >-
+      Crew consumes no user-supplied environment variable. The only four in the
+      codebase are TEMP (the OS), CLAUDECODE and CLAUDE_CODE_ENTRYPOINT (set by
+      Claude Code), and GIT_REDIRECT_STDERR (set by crew itself in the shared
+      config lib). Every project-specific value lives in that project's own
+      .claude/session-plugin.json instead. An empty .env.example would satisfy
+      the checklist and tell a reader nothing true.
+    open_risk: >-
+      `devctl init check` will keep reporting .env.example as missing, and the
+      remedy it names -- `devctl env check --fix-example` -- is not a real flag
+      on env-drift.py.
+
+# cli-library delivery is local -> CI -> prerelease -> stable release,
+# not a deployed stack. There is no server to health-check: "release"
+# means the marketplace manifest a user installs from.
+environments:
+  - name: development
+  - name: ci
+  - name: prerelease
+  - name: release
+# Each environment may declare the runtimes it deploys, so `devctl env
+# check --probe` can ask each one what commit it is running:
+#
+#   - name: staging
+#     source_branch: staging
+#     runtimes:
+#       - role: frontend
+#         provider: vercel
+#         health_url: https://staging.example.com/api/health
+#
+# Pick an environment strategy deliberately --
+# catalog/project-profiles.yaml describes four. A permanent second
+# stack is the most expensive way to get an integrated check.
