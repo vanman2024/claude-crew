@@ -3,6 +3,24 @@
 All notable changes to `crew` (directory: `plugins/claude-session-orchestrator`) are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Dispatch no longer dies mid `npm install` under Windows PowerShell 5.1.** Every
+  documented invocation used `powershell.exe` (5.1). There, any PowerShell-side redirect
+  of a native command's stderr — `*>`, `2>&1`, even `2>$null` — becomes an ErrorRecord,
+  and under `ErrorActionPreference=Stop` npm's harmless `EBADENGINE` warning terminated
+  `Initialize-WorkerWorktree` partway through the install: half-installed `node_modules`,
+  no psmux window, no worker. The 0.4.1 `-NoProfile` fix did not cover this; it is the
+  host, not the profile. Three parts:
+  - **All docs and the orchestrator brief now launch scripts with `pwsh`**, not `powershell.exe`.
+  - **`_session-config.ps1` refuses to load under 5.1** with a `pwsh` re-run hint, so a
+    wrong host fails before any worktree is touched, rather than halfway through.
+  - **The per-worktree install redirects inside `cmd`** (`cmd /c "npm install > log 2>&1"`),
+    so no stderr ever reaches PowerShell's error stream on any host.
+  - Regression tests: the lib is loaded under real `powershell.exe` and must refuse; the
+    install line must not use a PS-side redirect; no doc may launch via `powershell.exe`.
+
 ## [0.4.2] — 2026-06-23
 
 ### Added

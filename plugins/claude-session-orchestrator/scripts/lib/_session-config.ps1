@@ -13,6 +13,16 @@
 
 Set-StrictMode -Version Latest
 
+# Refuse to run under Windows PowerShell 5.1. There, ANY PowerShell-side redirect of a
+# native command's stderr (`*>`, `2>&1`, even `2>$null`) wraps each stderr line in an
+# ErrorRecord, and every script here runs with ErrorActionPreference=Stop - so a harmless
+# warning (npm EBADENGINE, psmux "no server running") becomes a terminating error. The
+# worst case was dispatch dying mid `npm install`, leaving half-installed worktrees and
+# no psmux window. pwsh 7 does not do this. Fail up front, before anything is touched.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    throw "crew requires PowerShell 7 (pwsh), but this is Windows PowerShell $($PSVersionTable.PSVersion). Re-run with: pwsh -NoProfile -ExecutionPolicy Bypass -File <script> ...  (install: winget install Microsoft.PowerShell)"
+}
+
 # Git for Windows writes progress ("Fetching...", "Cloning...") to STDERR. Under a
 # strict/Stop error preference (and PS 7's native-error handling) that stderr can be
 # treated as a terminating error and abort dispatch — the recurring "session won't
@@ -414,7 +424,11 @@ function Initialize-WorkerWorktree {
                         # Redirect ALL install output to a log file. Otherwise the native
                         # stdout flows into this function's return pipeline and poisons
                         # $WtPath, silently breaking psmux window creation downstream.
-                        cmd /c $install *> (Join-Path $pkgDir '.pnpm-install.log')
+                        # The redirect is done by cmd, not PowerShell: a PS-side `*>` turns
+                        # npm's stderr warnings (EBADENGINE) into terminating errors under
+                        # Stop on some hosts. The exit code is the only failure signal.
+                        $installLog = Join-Path $pkgDir '.pnpm-install.log'
+                        cmd /c "$install > `"$installLog`" 2>&1"
                         if ($LASTEXITCODE -ne 0) { throw "worktree dep install failed in '$pkgDir' ($install) - see .pnpm-install.log" }
                     } finally { Pop-Location }
                 }

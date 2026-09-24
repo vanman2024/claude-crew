@@ -178,7 +178,7 @@ Before writing, show the user the full JSON and confirm. After writing, validate
 by loading it:
 
 ```bash
-powershell.exe -ExecutionPolicy Bypass -Command ". '${CLAUDE_PLUGIN_ROOT}/scripts/lib/_session-config.ps1'; Get-SessionConfig -RepoPath '<repoPath>' | ConvertTo-Json -Depth 6"
+pwsh -NoProfile -ExecutionPolicy Bypass -Command ". '${CLAUDE_PLUGIN_ROOT}/scripts/lib/_session-config.ps1'; Get-SessionConfig -RepoPath '<repoPath>' | ConvertTo-Json -Depth 6"
 ```
 
 If it throws, fix the field it names and re-write.
@@ -203,7 +203,7 @@ Try it:
   /session orchestrate           (dashboard)
 
 Launch the autonomous orchestrator (its own window, /loop polling, no auto-merge):
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -Config "<repoPath>\.claude\session-plugin.json"
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -Config "<repoPath>\.claude\session-plugin.json"
 ```
 
 ## Notes
