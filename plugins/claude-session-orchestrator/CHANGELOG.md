@@ -20,6 +20,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
     so no stderr ever reaches PowerShell's error stream on any host.
   - Regression tests: the lib is loaded under real `powershell.exe` and must refuse; the
     install line must not use a PS-side redirect; no doc may launch via `powershell.exe`.
+- **The orchestrator and reviewer windows now save transcripts.** Their launchers cleared
+  `CLAUDECODE` / `CLAUDE_CODE_ENTRYPOINT` but not `CLAUDE_CODE_CHILD_SESSION`, which they
+  inherit when started from a Claude session, so Claude showed "Transcript saving is off"
+  and the window could not be resumed after a crash. They now clear it and set
+  `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1`, matching the worker launch.
 
 ## [0.4.2] — 2026-06-23
 

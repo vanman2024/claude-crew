@@ -155,6 +155,14 @@ Describe "Dispatch robustness: Windows PowerShell 5.1 (npm EBADENGINE killed dis
     }
 }
 
+Describe "Orchestrator + reviewer launch with transcript saving on" {
+    It "<_> clears CLAUDE_CODE_CHILD_SESSION and forces session persistence" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1') {
+        $body = Get-Content (Join-Path $script:ScriptsDir "dispatch\$_") -Raw
+        $body | Should -Match '\$env:CLAUDE_CODE_CHILD_SESSION=\$null'
+        $body | Should -Match "\`$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=''1''"
+    }
+}
+
 Describe "psmux-dispatch.ps1 -Continue (resume mode)" {
     BeforeAll { $script:PsmuxBody = Get-Content $script:PsmuxScript -Raw }
 
