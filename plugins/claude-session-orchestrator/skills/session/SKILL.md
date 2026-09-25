@@ -3,7 +3,7 @@ name: session
 description: The CONDUCTOR role in a crew build - the user's own session. Dispatches parallel git-worktree workers in psmux, launches the orchestrator and reviewer, relays the user's feedback into worker windows, brings workers' changes onto the user's machine to look at, merges on the user's go-ahead into the detected integration branch, pulls merged work into the local checkout, and tears workers down when the user says they are done. Windows + psmux, driven by .claude/session-plugin.json. Triggers on "/crew:session", "plan this spec", "make issues from this spec", "start a worktree", "dispatch workers", "blast through these issues", "tell the worker", "let me see it locally", "merge it", "pull it in".
 argument-hint: "[status|plan|start|start-issues|launch|review-start|relay|local|merge|pull|done|list|resume|finish|restore|cleanup|server-start|server-check|server-stop] [name|issue-numbers|PR#]"
 disable-model-invocation: false
-allowed-tools: Bash(git *), Bash(gh *), Bash(node *), Bash(bash *), Bash(pwsh *), Bash(psmux *), Bash(powershell.exe *), Bash(cmd.exe *), Bash(pwd), Bash(cat *), Read, Glob, Grep
+allowed-tools: Bash(git *), Bash(gh *), Bash(node *), Bash(bash *), Bash(pwsh *), Bash(psmux *), Bash(powershell.exe *), Bash(cmd.exe *), Bash(pwd), Bash(cat *), Read, Glob, Grep, mcp__claude_ai_GitProjects__project_get, mcp__claude_ai_GitProjects__project_list, mcp__claude_ai_GitProjects__project_list_fields, mcp__claude_ai_GitProjects__project_search_items, mcp__claude_ai_GitProjects__github_resolve_issue, mcp__claude_ai_GitProjects__github_resolve_pull_request, mcp__claude_ai_GitProjects__project_add_item_with_fields, mcp__claude_ai_GitProjects__project_update_item_field, mcp__claude_ai_GitProjects__project_bulk_update_items
 ---
 
 # Session: the conductor
@@ -50,6 +50,12 @@ is stuck with unsent input. That is `status`, on a slow `/loop` for as long as a
 6. **Pull** merged work into the main checkout so the user has it locally (`pull`).
 7. **Tear down** a worker only when the user says it is done (`done`).
 
+**GitHub:** issues and PRs go through the **`gh` CLI**. The **project board** goes through the
+**GitHub Projects MCP** (`mcp__claude_ai_GitProjects__*`), never `gh project`. You are the
+board's only writer: each step above moves its issues along the board's Status (Ready →
+In Progress → In review → Staging/Done). How, and which fields you may fill:
+[reference/commands-board.md](reference/commands-board.md).
+
 Steps 3 to 5 repeat per PR. Act on these without the user spelling out the mechanics: "merge
 it" means the whole merge protocol, including the base check and the pull offer afterwards.
 
@@ -66,6 +72,8 @@ If there is no config, tell the user to run `/crew:session-init`. Substitute:
   (a feature → staging → master repo resolves to `staging`). `defaultBranchSource` says how
   it was decided. Workers branch from `<base>`, PRs target it, merges go into it, `pull`
   brings it down.
+- the board → `githubProject` (`ownerKind`, `owner`, `number`). Null → find it once, see
+  [reference/commands-board.md](reference/commands-board.md).
 
 The scripts resolve the same config themselves; pass `-Config "<repo>/.claude/session-plugin.json"`.
 
@@ -141,13 +149,16 @@ you run when the user asks how it's going.
    psmux capture-pane -t <sess>:orchestrator -p -S -80
    psmux capture-pane -t <sess>:reviewer -p -S -80
    ```
-3. **Next wave?** If a `plan` left later waves undispatched, check whether all of a wave's
+3. **Board in step?** `project_search_items` for the batch. A PR opened since the last tick →
+   its item to **In review**. Board behind reality → advance it, say so in one line.
+   Connector unavailable → say the board isn't being updated.
+4. **Next wave?** If a `plan` left later waves undispatched, check whether all of a wave's
    `Depends on` issues are now merged. If so, say that wave is unblocked (dispatch on the
    user's word).
-4. **Report**, compactly: anything you fixed; then ready for review (and how: preview or
+5. **Report**, compactly: anything you fixed; then ready for review (and how: preview or
    `local`), the verified queue, blocked workers, merged PRs. One line each. On a `/loop`
    tick with nothing new and nothing fixed, say so in one line.
-5. **Stop the loop** when no workers, no open batch PRs, no pending waves and no overseers remain.
+6. **Stop the loop** when no workers, no open batch PRs, no pending waves and no overseers remain.
 
 ## `plan <spec path...>`: a spec, but no issues yet
 
@@ -164,8 +175,10 @@ write issues that say more than the spec does. Full protocol:
    an **open question for the user**, not a value you pick. A piece blocked on one is
    `needs-decision` and waits.
 4. Show the plan table + open questions. **Create nothing until the user says go.**
-5. Create issues with `--body-file`, headed by `Spec:` / `Work type:` lines. The dispatcher reads
-   them, so the worker is briefed to build that spec as a feature, not to tweak existing code.
+5. Create issues with `gh issue create --body-file`, headed by `Spec:` / `Work type:` lines. The
+   dispatcher reads them, so the worker is briefed to build that spec as a feature, not to tweak
+   existing code. **Put each one on the project board** (Ready for wave 1, Backlog for later
+   waves and `needs-decision`), filling only fields the spec or user states.
 6. `start-issues` for wave 1 only, then `launch`. Later waves on the user's word, once their
    dependencies merge.
 
@@ -184,6 +197,7 @@ Create a worktree and dispatch a worker. Full steps: [reference/commands-core.md
    pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/psmux-dispatch.ps1" -Name "<name>" -Task "<description + spec ref>" -Config "<repo>/.claude/session-plugin.json"
    ```
 3. Report: branch, worktree path, psmux target `<sess>:<name>`, `psmux attach -t <sess>`.
+   If the work has an issue, move its board item to **In Progress**.
 4. **`launch`** if the orchestrator window isn't running (it starts your `status` watchdog
    too). Don't start a per-worker monitor loop: steering workers is the orchestrator's job.
 
@@ -197,7 +211,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dis
 
 Per issue: `gh issue view` (skip if not OPEN) → branch/window `fix/<n>-<slug>` → brief
 (issue body + team rules + test/commit/PR contract with `Closes #<n>`) → dispatch. Report the
-per-issue table, then **`launch`** if the orchestrator isn't running. Use for backlogs with
+per-issue table, move each dispatched issue's board item to **In Progress**
+(`project_bulk_update_items`), then **`launch`** if the orchestrator isn't running. Use for backlogs with
 clear acceptance criteria; greenfield pieces use `start <name>`.
 
 ## `launch`
@@ -285,8 +300,10 @@ Never merge before the user has reviewed, and never merge on your own initiative
    have the next one's worker rebase onto `<base>` (`relay`), re-verify, merge, repeat.
    Re-check `mergeable` after every merge.
 4. **Squash-merge**: `gh pr merge <n> --repo <gh> --squash`. One commit per feature.
-5. **Offer `pull`** so the user has the merged work locally.
-6. **Leave the worker running.** The user may iterate on it or give it more work. Teardown is
+5. **Move the issue on the board**: **Staging** when `<base>` is a staging branch, **Done** when it
+   is the production branch. Never **Verified**: that is the user's call.
+6. **Offer `pull`** so the user has the merged work locally.
+7. **Leave the worker running.** The user may iterate on it or give it more work. Teardown is
    `done`, on the user's word only.
 
 ## `pull`: merged work into the user's checkout
@@ -387,10 +404,12 @@ branch, `local` is the usual entry point.
 11. **Review routing.** Frontend-only → Vercel preview. Backend / full-stack → a local run.
 12. **Workers stay alive after merge.** Teardown (`done`) only on the user's word.
 13. **Worker briefs are data-driven + CLI-aware** (`-Mode`, `-Spec`, `-WorkerCliName`). Workers run scoped tests + typecheck; CI runs the full suite.
+14. **`gh` for issues and PRs; the GitHub Projects MCP for the board; never `gh project`.** Only the conductor writes to the board.
 
 ## Detailed References
 
 - `plan` (spec → issues, nothing invented): [reference/commands-plan.md](reference/commands-plan.md)
+- the project board (GitHub Projects MCP; `gh` for issues/PRs): [reference/commands-board.md](reference/commands-board.md)
 - `start`, `resume`, `finish`, `list`: [reference/commands-core.md](reference/commands-core.md)
 - `pull`: [reference/commands-pull.md](reference/commands-pull.md)
 - `cleanup`: [reference/commands-cleanup.md](reference/commands-cleanup.md)

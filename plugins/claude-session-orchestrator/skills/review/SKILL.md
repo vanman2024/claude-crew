@@ -33,6 +33,7 @@ meaning it is detected from where merged PRs actually land.
 | Label a passing PR `READY-VERIFIED`; comment + nudge the worker on a failing one | Fix the code yourself. Workers fix |
 | Report the ordered, verified merge queue | Touch the main checkout at `<repo>`, your home worktree, or a worker's worktree |
 | Self-terminate when no worker windows and no open batch PRs remain | Poll with `Start-Sleep` or a scheduled task. `/loop` is the cadence |
+| Comment and review PRs with `gh` | Change the project board. The conductor is its only writer; your queue is what it acts on |
 
 The full cycle, the review gate and the output format:
 [reference/commands-review.md](reference/commands-review.md)

@@ -59,7 +59,9 @@ dispatched until the user answers. Pieces without blocking questions can go ahea
 
 ## Phase 4: Show the plan, create nothing yet
 
-Creating issues is visible to everyone on the repo, so the user approves first. Show:
+Creating issues is visible to everyone on the repo, so the user approves first. Read the
+project board's README first (`project_get`): if it requires fields on every item, include
+them in the table, marked "not in spec" where the spec is silent. Show:
 
 ```
 PLAN: specs/intake.md  →  5 pieces, 2 waves
@@ -115,6 +117,11 @@ Part of #<epic>
   The dispatcher briefs a `feature` worker to read the whole spec and build to it.
 - Five pieces or more: create a parent epic first, listing the waves, and link each issue to it
   (`Part of #<epic>`, and `gh issue edit <epic>` to add the task list once numbers exist).
+- **Put every issue on the project board** as you create it (GitHub Projects MCP, never
+  `gh project`; see [commands-board.md](commands-board.md)): Status **Ready** for wave 1 with no
+  blocking question, **Backlog** for later waves and `needs-decision`. Fill `Work type` from the
+  header and `Dependency order` from the wave if the board has it. Fields the spec doesn't state
+  (priority, dates, module, release slice) stay **empty**. List them in your summary as "to fill".
 - Dependencies are written with real numbers, so create in wave order and fill `Depends on`
   as you go. After creating, `gh issue view <n>` each one and check the body rendered, with
   real numbers and no leftover placeholders.

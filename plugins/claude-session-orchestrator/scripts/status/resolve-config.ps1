@@ -27,5 +27,7 @@ $cfg = Get-SessionConfig -Config $Config -RepoPath $RepoPath
     githubRepo          = $cfg.githubRepo
     defaultBranch       = $cfg.defaultBranch
     defaultBranchSource = $cfg._defaultBranchSource
+    # The GitHub Projects board the conductor keeps in step (null = not configured yet).
+    githubProject       = if ($cfg.PSObject.Properties.Name -contains "githubProject") { $cfg.githubProject } else { $null }
     configPath          = $cfg._configPath
 } | ConvertTo-Json

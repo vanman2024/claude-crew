@@ -29,6 +29,11 @@ Derive:
 - `psmuxSession` = lowercased `projectName` with non-alphanumerics stripped.
 - `defaultBranch` = `"auto"`. Do NOT copy GitHub's default branch: in a feature → staging → master repo that is `master`, and every worker PR would target the wrong branch. `"auto"` is resolved each run from where merged feature PRs actually land. Pin a branch name only if the user asks to.
 - `githubRepo` = from `gh` if available, else ask.
+- `githubProject` = the GitHub Projects board this repo's work is tracked on:
+  `{ "ownerKind": "USER"|"ORGANIZATION", "owner": "<login>", "number": <n> }`. Find it with the
+  GitHub Projects MCP (`project_list` for the repo owner) and pick the board whose title or readme
+  names this repo; confirm with the user. None → omit the key (the conductor then asks once).
+  Never use `gh project`.
 - `workerCmdPath` = the `.cmd` from `where.exe claude`; if only a non-.cmd path is found, prefer `C:\Users\<you>\AppData\Roaming\npm\claude.cmd`. Confirm it exists.
 - `workerCli` (optional) = which agent CLI the workers run. **Default: omit it (= the `claude` preset).** Only ask about this if the user wants non-Claude workers.
   - **Codex** is a verified preset: set `"workerCli": "codex"` and point `workerCmdPath` at the user's `codex.cmd` (e.g. `C:\Users\<you>\AppData\Roaming\npm\codex.cmd` — confirm via `where.exe codex.cmd`). It launches `--dangerously-bypass-approvals-and-sandbox --no-alt-screen`, auto-answers the trust-directory gate, and waits for the YOLO-mode header. The user must already be logged in (`codex login`).

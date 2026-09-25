@@ -49,6 +49,19 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   lost its spaces and its Enter, leaving `WaitforCIonce1e085andreportback` unsent in a live
   worker's box.
 
+### Added: the project board
+- **The conductor keeps the GitHub Projects board in step with the build**, through the
+  **GitHub Projects MCP**; issues and PRs stay on the **`gh` CLI`, and `gh project` is never
+  used. New config key `githubProject` (`ownerKind`, `owner`, `number`), printed by
+  `resolve-config.ps1`; `session-init` finds it with the MCP. The conductor is the board's only
+  writer and moves each issue along its Status: **Ready** or **Backlog** when `plan` creates
+  it, **In Progress** on dispatch, **In review** when its PR opens (seen on the `status` tick),
+  **Staging** or **Done** on merge. It never claims **Verified**. It follows the board README's
+  field rules but fills only what the spec or user states; required fields it can't source are
+  left empty and listed. An unavailable connector is reported, never replaced by `gh project`.
+  Protocol: `skills/session/reference/commands-board.md`. Dogfooded read-only against a real
+  board.
+
 ### Fixed (found by dogfooding a real launch in a sandbox psmux session)
 - **Every window's brief sat unsent.** Launchers typed the brief and pressed Enter once. The
   first submit after typing is sometimes eaten (Enter and C-m alike), and right after typing

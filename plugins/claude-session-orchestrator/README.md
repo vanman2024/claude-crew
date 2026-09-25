@@ -286,6 +286,16 @@ though GitHub's default is `master`. With no PR history it falls back to a `stag
 a warning if it pins `main`/`master` while a `staging`/`develop` branch exists). See what was
 resolved with `scripts/status/resolve-config.ps1`.
 
+### The project board (GitHub Projects)
+
+Issues and PRs go through the `gh` CLI; the project board goes through the **GitHub Projects
+MCP**, never `gh project`. Set `"githubProject": { "ownerKind": "USER", "owner": "<login>",
+"number": <n> }` in the config. The conductor is the board's only writer and moves each issue
+along its Status as the build does: **Ready** when planned, **In Progress** when a worker
+starts, **In review** when its PR opens, **Staging** or **Done** when merged. It fills only
+fields the spec or you state; required fields it can't source are left empty and listed.
+Protocol: `skills/session/reference/commands-board.md`.
+
 ### The orchestrator
 
 `/crew:session launch` runs:

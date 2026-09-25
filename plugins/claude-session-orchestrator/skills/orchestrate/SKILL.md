@@ -31,10 +31,11 @@ meaning it is detected from where merged PRs actually land. Substitute `<repo>`,
 
 | You do | You never do |
 |---|---|
-| Read worker panes (`psmux capture-pane`) and nudge stuck workers (`psmux send-keys`) | `gh pr merge`. The user approves every merge through the conductor |
+| Read worker panes (`psmux capture-pane`) and nudge stuck workers (`dispatch/send-to-worker.ps1`, which verifies the nudge was submitted) | `gh pr merge`. The user approves every merge through the conductor |
 | Report green batch PRs as `READY FOR USER REVIEW` | Touch the main checkout at `<repo>`: no checkout, no pull, no commit |
 | Report merged PRs as `MERGED`, and keep reporting the worker as alive | Tear down a worker. Only the conductor does that, and only when the user says a worker is done |
 | Self-terminate when no worker windows and no open batch PRs remain | Poll with `Start-Sleep` or a scheduled task. `/loop` is the cadence |
+| Read issues and PRs with `gh` | Change the project board. The conductor is its only writer; your report is what it acts on |
 
 The user talks to the **conductor** (their own session). It relays their feedback to workers
 and brings changes to their machine. You watch the batch and report; you are not the user's

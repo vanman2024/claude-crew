@@ -550,3 +550,56 @@ Describe "Test-InputSubmitted needs positive evidence (captured live)" {
         Test-InputSubmitted -Lines @("● planning: hooks.json: unknown key ""notes"" ignored", "● agents-md: no CLAUDE.md found; AGENTS.md loaded") | Should -BeFalse
     }
 }
+
+Describe "GitHub: gh for issues/PRs, the GitHub Projects MCP for the board" {
+    BeforeAll {
+        $script:SkillsDir = Join-Path $PSScriptRoot "..\skills"
+        $script:Board = Get-Content (Join-Path $script:SkillsDir "session\reference\commands-board.md") -Raw
+        $script:Conductor = Get-Content (Join-Path $script:SkillsDir "session\SKILL.md") -Raw
+    }
+
+    It "no skill or script runs a gh project command (the board goes through the MCP)" {
+        # Mentions of `gh project` in a "never" are fine; an actual subcommand is not.
+        $pluginRoot = Join-Path $PSScriptRoot ".."
+        $offenders = Get-ChildItem $pluginRoot -Recurse -Include *.md, *.ps1 |
+            Where-Object { $_.FullName -notmatch '\\tests\\' -and $_.Name -ne 'CHANGELOG.md' } |
+            Select-String -Pattern 'gh project (item-add|item-edit|item-list|item-create|field-list|list|view|create|edit|link)\b' |
+            ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+
+    It "the board protocol names the GitHub Projects MCP tools it relies on" {
+        foreach ($tool in 'github_resolve_issue', 'project_add_item_with_fields', 'project_update_item_field', 'project_list_fields', 'project_search_items') {
+            $script:Board | Should -Match $tool
+        }
+    }
+
+    It "the conductor is the board's only writer, and the overseers are told not to write it" {
+        $script:Board | Should -Match 'only the \*\*conductor\*\* changes the board'
+        foreach ($s in 'orchestrate', 'review') {
+            (Get-Content (Join-Path $script:SkillsDir "$s\SKILL.md") -Raw) | Should -Match 'Change the project board'
+        }
+    }
+
+    It "the conductor may call the board tools without a permission prompt" {
+        $script:Conductor | Should -Match 'allowed-tools:.*mcp__claude_ai_GitProjects__project_update_item_field'
+    }
+
+    It "the build moves items along Status: <_>" -ForEach @('Ready', 'In Progress', 'In review', 'Staging', 'Done') {
+        $script:Board | Should -Match "\*\*$_\*\*"
+    }
+
+    It "the crew never claims Verified, and never invents field values" {
+        $script:Board | Should -Match 'the crew never claims verification'
+        $script:Board | Should -Match 'Never guess a priority, a date or a module'
+    }
+
+    It "an unavailable connector is reported, not silently skipped or replaced by gh project" {
+        $script:Board | Should -Match "isn't connected"
+        $script:Board | Should -Match 'do not fall\s+back to `gh project`'
+    }
+
+    It "resolve-config exposes the board" {
+        (Get-Content (Join-Path $PSScriptRoot "..\scripts\status\resolve-config.ps1") -Raw) | Should -Match 'githubProject'
+    }
+}
