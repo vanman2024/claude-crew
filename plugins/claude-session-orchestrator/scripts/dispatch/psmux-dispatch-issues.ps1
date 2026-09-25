@@ -87,7 +87,14 @@ foreach ($n in $Issues) {
 $($issue.body)
 "@
 
-    $brief = New-WorkerBrief -Config $cfg -Name $name -Branch $branch -Task $task -IssueNumber $n -Title $issue.title
+    # A crew-planned issue names its spec and work type; honour them so a new piece of a
+    # spec is briefed as a feature built to that spec, not an iteration on existing code.
+    $hints = Get-IssueBriefHints -Body $issue.body
+    $briefArgs = @{ Config = $cfg; Name = $name; Branch = $branch; Task = $task; IssueNumber = $n; Title = $issue.title }
+    if ($hints.Spec) { $briefArgs.Spec = $hints.Spec }
+    if ($hints.Mode) { $briefArgs.Mode = $hints.Mode }
+    if ($hints.Spec -or $hints.Mode) { Write-Host "  From issue: spec=$($hints.Spec) mode=$($hints.Mode)" }
+    $brief = New-WorkerBrief @briefArgs
     $briefFile = Join-Path $briefDir "brief-$n.md"
     Set-Content -Path $briefFile -Value $brief -Encoding UTF8
 

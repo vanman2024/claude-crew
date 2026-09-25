@@ -1,7 +1,7 @@
 ---
 name: session
-description: The CONDUCTOR role in a crew build - the user's own session. Dispatches parallel git-worktree workers in psmux, launches the orchestrator and reviewer, relays the user's feedback into worker windows, brings workers' changes onto the user's machine to look at, merges on the user's go-ahead into the detected integration branch, pulls merged work into the local checkout, and tears workers down when the user says they are done. Windows + psmux, driven by .claude/session-plugin.json. Triggers on "/crew:session", "start a worktree", "dispatch workers", "blast through these issues", "tell the worker", "let me see it locally", "merge it", "pull it in".
-argument-hint: "[status|start|start-issues|launch|review-start|relay|local|merge|pull|done|list|resume|finish|restore|cleanup|server-start|server-check|server-stop] [name|issue-numbers|PR#]"
+description: The CONDUCTOR role in a crew build - the user's own session. Dispatches parallel git-worktree workers in psmux, launches the orchestrator and reviewer, relays the user's feedback into worker windows, brings workers' changes onto the user's machine to look at, merges on the user's go-ahead into the detected integration branch, pulls merged work into the local checkout, and tears workers down when the user says they are done. Windows + psmux, driven by .claude/session-plugin.json. Triggers on "/crew:session", "plan this spec", "make issues from this spec", "start a worktree", "dispatch workers", "blast through these issues", "tell the worker", "let me see it locally", "merge it", "pull it in".
+argument-hint: "[status|plan|start|start-issues|launch|review-start|relay|local|merge|pull|done|list|resume|finish|restore|cleanup|server-start|server-check|server-stop] [name|issue-numbers|PR#]"
 disable-model-invocation: false
 allowed-tools: Bash(git *), Bash(gh *), Bash(node *), Bash(bash *), Bash(pwsh *), Bash(psmux *), Bash(powershell.exe *), Bash(cmd.exe *), Bash(pwd), Bash(cat *), Read, Glob, Grep
 ---
@@ -37,6 +37,8 @@ is stuck with unsent input. That is `status`, on a slow `/loop` for as long as a
 
 ### What the conductor does, in the order it usually happens
 
+0. **Plan**, when the user brings a spec and there are no issues for it yet (`plan`): cut the
+   spec into issues **without inventing anything**, show the plan, create on their word.
 1. **Dispatch** workers (`start`, `start-issues`) and make sure the orchestrator and
    reviewer are running (`launch`).
 2. **Watch** every terminal: `/loop 10m /crew:session status`, started by `launch`. Fix what's
@@ -95,6 +97,7 @@ touch the *same* module's files collide at merge time. Parallelize **across** mo
 | Command | What it does |
 |---------|-------------|
 | `status` | **Health watchdog** (the conductor's `/loop` body): every window up and working? Fix what isn't, then the overseers' latest reports |
+| `plan <spec...>` | A spec with no issues yet → issues cut from the spec (nothing invented), approved by the user, wave 1 dispatched |
 | `start <name>` | Worktree + worker for one piece of work, then `launch` if the orchestrator isn't up |
 | `start-issues <n> <n> ...` | **Bulk.** One worker per GitHub issue (`fix/<n>-<slug>`), then `launch` |
 | `launch` | Start the orchestrator (+ reviewer) if their windows aren't running |
@@ -137,10 +140,36 @@ you run when the user asks how it's going.
    psmux capture-pane -t <sess>:orchestrator -p -S -80
    psmux capture-pane -t <sess>:reviewer -p -S -80
    ```
-3. **Report**, compactly: anything you fixed; then ready for review (and how: preview or
+3. **Next wave?** If a `plan` left later waves undispatched, check whether all of a wave's
+   `Depends on` issues are now merged. If so, say that wave is unblocked (dispatch on the
+   user's word).
+4. **Report**, compactly: anything you fixed; then ready for review (and how: preview or
    `local`), the verified queue, blocked workers, merged PRs. One line each. On a `/loop`
    tick with nothing new and nothing fixed, say so in one line.
-4. **Stop the loop** when no workers, no open batch PRs and no overseers remain.
+5. **Stop the loop** when no workers, no open batch PRs, no pending waves and no overseers remain.
+
+## `plan <spec path...>`: a spec, but no issues yet
+
+The user brings a spec, not issues. Don't dispatch from a spec you haven't cut up, and don't
+write issues that say more than the spec does. Full protocol:
+[reference/commands-plan.md](reference/commands-plan.md).
+
+1. Read the spec IN FULL; check which issues already exist for it (reuse, don't duplicate).
+   Too vague to split → say what's missing and ask. Don't draft.
+2. Cut along the spec's own sections: one worker, one file-lane, one PR per piece. Order them in
+   **waves** by dependency (schema → API → UI).
+3. **Invent nothing.** Every requirement and acceptance criterion comes from the spec, with its
+   section. Where the spec is silent (a field, an endpoint, a limit, missing acceptance), that's
+   an **open question for the user**, not a value you pick. A piece blocked on one is
+   `needs-decision` and waits.
+4. Show the plan table + open questions. **Create nothing until the user says go.**
+5. Create issues with `--body-file`, headed by `Spec:` / `Work type:` lines. The dispatcher reads
+   them, so the worker is briefed to build that spec as a feature, not to tweak existing code.
+6. `start-issues` for wave 1 only, then `launch`. Later waves on the user's word, once their
+   dependencies merge.
+
+A single, already-clear piece doesn't need issues: `start <name> -Task "..."` with
+`-Mode feature -Spec <path>` dispatches straight from the spec.
 
 ## `start <name>`
 
@@ -360,6 +389,7 @@ branch, `local` is the usual entry point.
 
 ## Detailed References
 
+- `plan` (spec → issues, nothing invented): [reference/commands-plan.md](reference/commands-plan.md)
 - `start`, `resume`, `finish`, `list`: [reference/commands-core.md](reference/commands-core.md)
 - `pull`: [reference/commands-pull.md](reference/commands-pull.md)
 - `cleanup`: [reference/commands-cleanup.md](reference/commands-cleanup.md)

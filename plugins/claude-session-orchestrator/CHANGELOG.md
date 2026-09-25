@@ -33,6 +33,17 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   blocking its input box), `exited` (CLI quit to a shell prompt) or `missing`, with a pane hash
   to spot a stalled loop. `/crew:session launch` starts `/loop 10m /crew:session status`, which
   restarts dead overseers and asks before resuming workers.
+- **`/crew:session plan <spec>`: a spec, but no issues yet.** The conductor cuts the spec
+  along its own sections into one-worker, one-lane pieces ordered in dependency waves, and
+  **invents nothing**. Every requirement and acceptance criterion comes from the spec, with its
+  section. Where the spec is silent (a field, an endpoint, missing acceptance), it asks an open
+  question, and a piece blocked on one is `needs-decision`. It shows the plan and creates no
+  issues until the user says go, then creates them with `--body-file` and dispatches wave 1.
+  Protocol: `skills/session/reference/commands-plan.md`.
+- **Planned issues carry their spec to the worker.** `psmux-dispatch-issues.ps1` reads
+  `Spec:` / `Work type:` header lines (`Get-IssueBriefHints`). Before, every issue-based worker
+  was briefed as an ITERATION with no spec, so a new piece of a spec would have been told to
+  change existing code only, and never read the spec.
 - **`dispatch/send-to-worker.ps1`**: relays a message as one argument, presses Enter
   separately, and verifies it was submitted. A bare `psmux send-keys` with separate words
   lost its spaces and its Enter, leaving `WaitforCIonce1e085andreportback` unsent in a live

@@ -433,6 +433,28 @@ function Format-DocsSection {
     return $sb.ToString()
 }
 
+# Read the dispatch hints a crew-planned issue carries in its header lines:
+#   Spec: specs/intake.md          -> the worker's source of truth (-Spec)
+#   Work type: feature|iteration   -> -Mode
+# The conductor's `plan` writes them. Without them an issue brief defaults to an
+# ITERATION with no spec, which is wrong for a new piece of a spec: the worker would
+# be told to change existing code only and would never read the spec. Accepts the
+# lines plain or bolded ("**Spec:**"). Returns $null for anything absent.
+function Get-IssueBriefHints {
+    param([string]$Body)
+    $hints = [pscustomobject]@{ Spec = $null; Mode = $null }
+    if (-not $Body) { return $hints }
+    foreach ($line in ($Body -split '\r?\n')) {
+        if (-not $hints.Spec -and $line -match '^\s*\*{0,2}Spec:\*{0,2}\s*`?([^\s`]+\.(md|mdx|txt|ya?ml|json))`?') {
+            $hints.Spec = $Matches[1]
+        }
+        if (-not $hints.Mode -and $line -match '^\s*\*{0,2}Work type:\*{0,2}\s*(feature|iteration)\b') {
+            $hints.Mode = $Matches[1].ToLower()
+        }
+    }
+    return $hints
+}
+
 function New-WorkerBrief {
     param(
         [Parameter(Mandatory)]$Config,

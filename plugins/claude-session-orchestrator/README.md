@@ -267,6 +267,7 @@ conductor and acts like one; only the conductor merges or touches your checkout.
 | Command | What it does |
 |---------|-------------|
 | `status` | Watchdog: is every terminal up and working (`running` / `pending` / `exited` / `missing`)? Fixes overseers, then relays their reports. `launch` loops it every 10 min |
+| `plan <spec...>` | Spec with no issues yet → issues cut from the spec (open questions asked, nothing invented), created on your go, wave 1 dispatched |
 | `start <name>` / `start-issues 510 511 512` | Dispatch one worker / one per GitHub issue, then `launch` if needed |
 | `launch` | Start the orchestrator (+ reviewer) if they aren't running |
 | `relay <worker> "<msg>"` | Send your feedback into a worker's window (via `send-to-worker.ps1`, which verifies it was submitted) |

@@ -173,7 +173,7 @@ Describe "One skill per role (conductor / orchestrator / reviewer)" {
         $s | Should -Match 'you are the \*\*conductor\*\*'
     }
 
-    It "the conductor skill covers <_>" -ForEach @('status', 'relay', 'local', 'merge', 'pull', 'done', 'launch') {
+    It "the conductor skill covers <_>" -ForEach @('status', 'plan', 'relay', 'local', 'merge', 'pull', 'done', 'launch') {
         (Get-SkillText 'session') | Should -Match "(?m)^## ``$_"
     }
 
@@ -358,5 +358,59 @@ Describe "Get-PaneState (the watchdog's pane classifier)" {
     It "an old submitted prompt far above the bottom is not mistaken for pending input" {
         $pane = @("❯ build the intake form") + @(1..10 | ForEach-Object { "working line $_" }) + @("❯ ", "  ⏵⏵ bypass permissions on")
         (Get-PaneState -Lines $pane).State | Should -Be "running"
+    }
+}
+
+Describe "Spec -> issues: plan never invents, and the spec reaches the worker" {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1")
+        . (Join-Path $PSScriptRoot "..\scripts\lib\_session-brief.ps1")
+        $script:PlanRef = Get-Content (Join-Path $PSScriptRoot "..\skills\session\reference\commands-plan.md") -Raw
+    }
+
+    It "reads Spec and Work type from a planned issue's header" {
+        $body = "Spec: specs/intake.md`nSpec section: §4 Form`nWork type: feature`nLane: frontend`n`n## What the spec says`n> ..."
+        $h = Get-IssueBriefHints -Body $body
+        $h.Spec | Should -Be "specs/intake.md"
+        $h.Mode | Should -Be "feature"
+    }
+
+    It "accepts bolded and backticked header lines" {
+        $h = Get-IssueBriefHints -Body "**Spec:** ``docs/specs/f012-billing.md```n**Work type:** Iteration"
+        $h.Spec | Should -Be "docs/specs/f012-billing.md"
+        $h.Mode | Should -Be "iteration"
+    }
+
+    It "returns nothing for an ordinary issue, so the old default still applies" {
+        $h = Get-IssueBriefHints -Body "The login button is misaligned on mobile.`nSteps: ..."
+        $h.Spec | Should -BeNullOrEmpty
+        $h.Mode | Should -BeNullOrEmpty
+    }
+
+    It "a planned issue briefs the worker to build to the spec as a feature, not an iteration" {
+        $cfg = Get-Content (Join-Path $PSScriptRoot "..\examples\session-plugin.root.json") -Raw | ConvertFrom-Json
+        $h = Get-IssueBriefHints -Body "Spec: specs/intake.md`nWork type: feature"
+        $brief = New-WorkerBrief -Config $cfg -Name "fix-12-intake" -Branch "fix/12-intake" -Task "t" -IssueNumber 12 -Spec $h.Spec -Mode $h.Mode
+        $brief | Should -Match 'NEW FEATURE'
+        $brief | Should -Match 'specs/intake\.md'
+    }
+
+    It "the bulk dispatcher passes the issue's hints into the brief" {
+        $body = Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\psmux-dispatch-issues.ps1") -Raw
+        $body | Should -Match 'Get-IssueBriefHints'
+    }
+
+    It "plan's rules: silence in the spec becomes an open question, never a made-up value" {
+        $script:PlanRef | Should -Match 'Never make criteria up'
+        $script:PlanRef | Should -Match 'open question'
+        $script:PlanRef | Should -Match 'needs-decision'
+    }
+
+    It "plan shows the plan and creates nothing until the user says go" {
+        $script:PlanRef | Should -Match 'create nothing yet'
+    }
+
+    It "plan creates issues with --body-file (inline bodies got mangled)" {
+        $script:PlanRef | Should -Match '--body-file'
     }
 }
