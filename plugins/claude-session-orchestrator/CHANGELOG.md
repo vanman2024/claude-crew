@@ -51,7 +51,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added: the project board
 - **The conductor keeps the GitHub Projects board in step with the build**, through the
-  **GitHub Projects MCP**; issues and PRs stay on the **`gh` CLI`, and `gh project` is never
+  **GitHub Projects MCP**; issues and PRs stay on the **`gh` CLI**, and `gh project` is never
   used. New config key `githubProject` (`ownerKind`, `owner`, `number`), printed by
   `resolve-config.ps1`; `session-init` finds it with the MCP. The conductor is the board's only
   writer and moves each issue along its Status: **Ready** or **Backlog** when `plan` creates
