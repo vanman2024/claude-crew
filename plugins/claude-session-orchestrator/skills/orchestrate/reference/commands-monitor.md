@@ -2,7 +2,7 @@
 
 > Paths/session/repo/branch come from `.claude/session-plugin.json` — substitute `<repo>`, `<wt>`, `<sess>`, `<gh>`, `<base>`.
 
-**One poll cycle for one worktree agent.** Designed to run on a loop via `/loop 3m /session monitor <name>`.
+**One poll cycle for one worktree agent**, run by the orchestrator (`/crew:orchestrate monitor <name>`). `poll` runs the same analysis across every worker; the conductor never loops this.
 
 This is the **core feedback loop** between the orchestrator and worktree agents. Without it, agents get sidetracked and build nothing.
 
@@ -84,7 +84,7 @@ The trailing `Enter` submits it (no ConPTY keybinding hack required — this is 
 ### Message Templates
 
 The exact test command in these templates comes from the project's test commands
-(from `config.layout` — see [build-protocol.md](build-protocol.md)). Substitute it for
+(from `config.layout` — see [build-protocol.md](../../session/reference/build-protocol.md)). Substitute it for
 `<project test command>` below.
 
 **Redirect (sidetracked):**
@@ -126,28 +126,13 @@ MONITOR [<name>]: <STATE> | commits: <n> | uncommitted: <n> files | action: <wha
 
 ---
 
-## Integration with `/session start`
+## Relation to `/crew:orchestrate poll`
 
-After `/session start <name>` dispatches the worker via `psmux-dispatch.ps1`, it MUST invoke:
-
-```
-/loop 3m /session monitor <name>
-```
-
-This starts the poll loop automatically. The loop runs every 3 minutes until:
-- The agent creates a PR (monitor detects it and reports COMPLETE)
-- The user manually stops the loop
-- The psmux window disappears (agent crashed)
-
----
-
-## Integration with `/session orchestrate poll`
-
-`/session orchestrate poll` runs the full workflow (PRs + monitor + report + cleanup-after-merge)
-for ALL active workers in a single pass. For terminal monitoring it runs the same analysis as
-`/session monitor` but across every active worktree at once. The logic is identical — only the
-scope differs. (The orchestrator never merges — see [commands-orchestrate.md](commands-orchestrate.md).)
-
+`poll` runs the full workflow (PRs + monitor + report) for ALL active workers in a single
+pass, using exactly this analysis per worker. `monitor <name>` is the same thing scoped to one
+worker. Neither merges nor tears down (see [commands-orchestrate.md](commands-orchestrate.md)).
+Nobody loops `monitor` separately any more: the orchestrator's `/loop` over `poll` already
+covers every worker, and the conductor (the user's session) never polls.
 ---
 
 ## Tracking State Across Polls

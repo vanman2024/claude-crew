@@ -10,11 +10,11 @@ is ever merged blind. You do **not** merge — you produce an ordered, verified 
 the user authorizes each merge.
 
 The reviewer is the automated form of the pre-merge verification in the
-[merge protocol](../SKILL.md) ("checkout the branch in its own worktree, smoke-test,
+[merge protocol](../../session/SKILL.md) ("checkout the branch in its own worktree, smoke-test,
 then merge"). The orchestrator (`orchestrate poll`) *flags* green PRs; the reviewer
 *proves* them.
 
-Sub-commands: `review` (one cycle, the `/loop` body) and `review-start` (spawn the loop).
+`/crew:review` runs one cycle (the `/loop` body). Launching the reviewer (`review-start`) is the conductor's job, in `/crew:session`.
 
 ---
 
@@ -43,7 +43,7 @@ Sub-commands: `review` (one cycle, the `/loop` body) and `review-start` (spawn t
    `<wt>/orchestrator`. PRs from previous sessions or the user's own branches are out of
    scope. (Mirrors orchestrator Contract 2.)
 
-6. **`/loop` is the cron.** The cadence is `/loop <interval> /session review`. Never use
+6. **`/loop` is the cron.** The cadence is `/loop <interval> /crew:review`. Never use
    Windows scheduled tasks or `Start-Sleep` loops. The PS launcher's job ends after
    launching Claude. (Mirrors orchestrator Contract 6.)
 
@@ -180,6 +180,6 @@ Stop: `psmux kill-window -t <sess>:reviewer` (or it self-terminates — Contract
 ## When the user says "merge it"
 
 The reviewer has already done the hard part: each `READY-VERIFIED` PR is tested, reviewed,
-and ordered. The user's conversational Claude just executes the merge protocol in
-[SKILL.md](../SKILL.md) over the verified queue — squash-merge in queue order, rebasing
+and ordered. The conductor (the user's own session) just executes the merge protocol in
+[the conductor skill](../../session/SKILL.md) over the verified queue — squash-merge in queue order, rebasing
 the next overlapping PR after each merge.

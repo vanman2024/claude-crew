@@ -2,12 +2,12 @@
 
 > Paths/session/repo/branch come from `.claude/session-plugin.json` — substitute `<repo>`, `<wt>`, `<sess>`, `<gh>`, `<base>`.
 
-**YOU ARE THE ORCHESTRATOR.** Run from the dedicated orchestrator Claude spawned by
-`dispatch/start-orchestrator.ps1` into `<sess>:orchestrator` — its own detached worktree at
-`<wt>/orchestrator`, NOT the main repo at `<repo>`. (It is also runnable from the main
-session, but the dedicated orchestrator is the intended host.)
+**YOU ARE THE ORCHESTRATOR.** Run only from the dedicated orchestrator Claude spawned by
+`dispatch/start-orchestrator.ps1` into `<sess>:orchestrator`, in its own detached worktree at
+`<wt>/orchestrator`, NOT the main repo at `<repo>`. The user's own session is the
+**conductor**; dispatching, merging, pulling and tearing down are its jobs, in `/crew:session`.
 
-Sub-commands: `orchestrate [dashboard|dispatch|poll|pull|cleanup|verify <name>|verify-all]`
+Sub-commands: `/crew:orchestrate [poll|monitor <name>|verify <name>|verify-all]`
 
 ---
 
@@ -35,9 +35,9 @@ sub-command below is written to honor them. Read them first.
 3. **Do NOT auto-tear-down. Keep workers alive.** A merged PR does NOT make a worker disposable —
    the user keeps it alive to iterate (tell the worker to fix → push → re-review, or work the
    checked-out branch) or to give it more tasks, and the work is already on the remote regardless.
-   Tear down via `teardown/close-worker.ps1` (junction-first: detaches the node_modules junction(s)
-   BEFORE `git worktree remove`) **ONLY** when the USER explicitly says that worker is done. Never
-   auto-clean after a merge; never tear down a worktree with an open PR.
+   Teardown is the **conductor's** job (`teardown/close-worker.ps1`, junction-first), done
+   **ONLY** when the USER explicitly says that worker is done. The orchestrator never tears
+   anything down.
 
 4. **Self-terminate.** End the loop when there are **no live worker windows AND no open PRs from
    this batch**. Print a summary, exit the loop, exit Claude.
@@ -47,7 +47,7 @@ sub-command below is written to honor them. Read them first.
    **NEVER** modifies or commits in its own worktree. Read-only git is fine
    (`git -C <abs-path> fetch`, `git -C <abs-path> status`, `git -C <repo> worktree list`).
 
-6. **`/loop` is the cron.** Polling is driven by `/loop <interval> /session orchestrate poll`.
+6. **`/loop` is the cron.** Polling is driven by `/loop <interval> /crew:orchestrate poll`.
    Never use Windows scheduled tasks or PowerShell `Start-Sleep` polling loops. The PS scripts'
    job ends after launching Claude; the recurring cadence is `/loop`.
 
@@ -56,10 +56,10 @@ sub-command below is written to honor them. Read them first.
 ## The Workflow (How Everything Fits Together)
 
 ```
-DISPATCH → MONITOR/SEND → POLL PRs → REPORT READY → (USER MERGES) → CLEANUP → repeat
-   │            │              │            │              │            │
-   │            │              │            │              │            └─ close-worker.ps1 (junction-first)
-   │            │              │            │              └─ user says "merge it" to their Claude
+DISPATCH → MONITOR/SEND → POLL PRs → REPORT READY → (USER MERGES) → WORKER STAYS ALIVE
+(conductor)  (you)          (you)       (you)          (conductor)      until the user says done
+   │            │              │            │              │
+   │            │              │            │              └─ user says "merge it" to the conductor
    │            │              │            └─ flag green batch PRs as READY FOR USER REVIEW
    │            │              └─ gh pr list + CI status, filtered to the batch
    │            └─ psmux capture-pane + psmux send-keys
@@ -73,68 +73,16 @@ DISPATCH → MONITOR/SEND → POLL PRs → REPORT READY → (USER MERGES) → CL
 3. **Send messages** — nudge stuck agents, tell done agents to test + create PRs.
 4. **Check open PRs (batch-scoped)** — which have passing CI?
 5. **Report green PRs as READY FOR USER REVIEW** — never merge (Contract 1).
-6. **Cleanup** — for any batch PR observed merged by the user, tear down via `close-worker.ps1` (Contract 3).
+6. **Merged PRs** — report any batch PR the user merged as `MERGED`. Do NOT tear its worker down (Contract 3).
 7. **Self-terminate check** — no live workers AND no open batch PRs → summarize and exit (Contract 4).
 8. **Report** — compact summary of what happened this poll.
-
----
-
-## `orchestrate` / `orchestrate dashboard`
-
-Status dashboard of the batch: active worktrees + their open PRs + live workers.
-
-### Steps
-
-1. Active worktrees + branches:
-   ```
-   git -C <repo> worktree list --porcelain
-   ```
-2. Open PRs, then filter to the batch (Contract 2):
-   ```
-   gh pr list --repo <gh> --state open --base <base> --json number,title,headRefName,mergeable,statusCheckRollup
-   ```
-3. Live workers:
-   ```
-   psmux list-windows -t <sess>
-   ```
-4. Display the combined dashboard (skip the `orchestrator` window itself):
-   ```
-   ORCHESTRATOR DASHBOARD
-   ======================
-   Open PRs (this batch):
-     #26  feature/f008-quiz   Lint OK  Types OK  Build OK    → READY FOR USER REVIEW
-
-   Active Worktrees:
-     f008-quiz      window: <sess>:f008-quiz   commits: 3   status: idle
-
-   psmux windows: f008-quiz, f021-referral
-   ```
-
----
-
-## `orchestrate dispatch`
-
-Launch new worktree sessions. Alias for `/session start <name>`, batch-friendly.
-
-1. Determine the next pieces to build (from the spec/brief the user pointed you at — see
-   the task brief in `.claude-bootstrap.md` and any spec it references).
-2. For each piece to dispatch:
-   ```
-   /session start <name>
-   ```
-   (which runs `dispatch/psmux-dispatch.ps1` — worktree + psmux window + Claude worker + bootstrap)
-3. Each becomes a `<sess>:<name>` psmux window, addressable by `capture-pane`/`send-keys`.
-4. Report what was launched + the attach command (`psmux attach -t <sess>`).
-
-For an issue-backlog blast, prefer `/session start-issues <n> <n> ...`
-(`dispatch/psmux-dispatch-issues.ps1`).
 
 ---
 
 ## `orchestrate poll`
 
 **THE MAIN LOOP.** Compute the batch, monitor agents, send messages, report green PRs as
-READY FOR USER REVIEW, clean up after user-merged PRs. **No merging.**
+READY FOR USER REVIEW, report user-merged PRs. **No merging, no teardown.**
 
 ### Phase 1: Compute the batch (Contract 2)
 
@@ -194,12 +142,12 @@ For each batch PR:
 
 ### Phase 4: Verify Work (optional — the reviewer does the deep pass)
 
-> The **reviewer** (`/session review`, spawned by `start-reviewer.ps1` alongside this
+> The **reviewer** (`/crew:review`, spawned by `start-reviewer.ps1` alongside this
 > orchestrator) does the real pre-merge verification: it checks each green PR out in its
 > own `review-checkout` worktree, runs the project tests + `/code-review`, and labels it
 > `READY-VERIFIED`. The orchestrator's verify below is a *shallow* deliverable-existence
 > check; leave the deep gate to the reviewer and don't duplicate it. See
-> [commands-review.md](commands-review.md).
+> [commands-review.md](../../review/reference/commands-review.md).
 
 For batch PRs, optionally verify the agent built what the brief asked:
 1. Read the task brief (`.claude-bootstrap.md`) and any spec it points to — extract key deliverables.
@@ -218,14 +166,9 @@ gh pr diff <n> --name-only          # compare paths against config.teams ownsPat
 ```
 - **Frontend-only** (every changed path in the frontend lane) → report "review on the Vercel
   preview" with the PR/preview URL. No local checkout.
-- **Backend / full-stack** (any backend-lane path) → report it **needs a local checkout** so the
-  user can run it on 3000/8000 (a preview can't exercise backend). Offer to fetch + check the branch
-  out into the `review-checkout` worktree and `server-start` it.
-
-Teardown is **user-driven only**: run `close-worker.ps1` (junction-first — detaches the
-node_modules junction(s) BEFORE `git worktree remove`, kills the window, prunes) **only** when the
-user explicitly says a worker is done. Never raw `git worktree remove` a worktree whose junctions are
-still attached. Keep workers alive after merge for iteration.
+- **Backend / full-stack** (any backend-lane path) → report it **needs a local run**, so the
+  user can exercise it on their machine (a preview can't exercise backend). Bringing it local is
+  the conductor's job (`/crew:session local <name>`); just say which PRs need it.
 
 ### Phase 6: Self-terminate check (Contract 4)
 
@@ -243,33 +186,10 @@ POLL RESULTS
 Ready for review:  #26 f008-quiz (CI green), #25 f021-referral (CI green)
 Agents:            f008-quiz (idle, done), f045-progress (building)
 Sent:              f045-progress ← "status check" nudge
-Cleaned:           f008-quiz (PR merged by user → torn down via close-worker)
+Merged:            f008-quiz (#26, merged by user; worker kept alive)
 Blocked:           none
 Out of scope:      (ignored — not in this batch)
 ```
-
----
-
-## `orchestrate pull`
-
-Alias for `/session pull` — show the PR dashboard, then (on the user's go) merge + pull +
-cleanup. This is a **user-driven** command, not part of the autonomous loop: the orchestrator
-itself never merges (Contract 1). See [commands-pull.md](commands-pull.md).
-
----
-
-## `orchestrate cleanup`
-
-Force-clean ALL worktree directories regardless of state (nuclear — confirm with the user first):
-
-```bash
-pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/nuke-worktrees.ps1" -Config "<repo>/.claude/session-plugin.json"
-psmux kill-session -t <sess>   # also tear down the psmux session
-git -C <repo> worktree prune
-```
-
-For routine post-merge teardown of a single worker, prefer `teardown/close-worker.ps1` (Contract 3) —
-`nuke-worktrees.ps1` is for blowing everything away.
 
 ---
 
@@ -319,17 +239,10 @@ f021-referral        PASS   PASS   5/5           100%
 | `psmux list-windows -t <sess>` | List live worker windows |
 | `psmux capture-pane -t <sess>:<name> -p` | Read a worker's pane (no focus steal) |
 | `psmux send-keys -t <sess>:<name> "<msg>" Enter` | Send a message / nudge |
-| `dispatch/psmux-dispatch.ps1` | Dispatch a worktree worker (`-Name` + `-Task`/`-Bootstrap`/`-BootstrapFile`) |
-| `dispatch/psmux-dispatch-issues.ps1` | Bulk dispatch one worker per GitHub issue (`-Issues 510,511,512`) |
-| `dispatch/start-orchestrator.ps1` | Spawn the dedicated orchestrator Claude + its `/loop` (`-IntervalMin 5`) |
-| `teardown/close-worker.ps1` | **Junction-first** post-merge teardown of one worker (`-Name <name>`) |
-| `psmux kill-window -t <sess>:<name>` | Close one worker window (prefer `close-worker.ps1` for full teardown) |
-| `psmux kill-session -t <sess>` | Tear down the whole session |
-| `teardown/nuke-worktrees.ps1` | Kill all processes + delete all worktree dirs (nuclear) |
-| `teardown/kill-worktree-agents.ps1` | Kill just the worker processes in worktrees |
-| `teardown/cleanup-worktrees.ps1` | Gentler cleanup without process killing |
 | `status/check-worktree-health.ps1` | Health check (git, deps, env). `-Name <n>` or `-All` |
-| `util/force-remove-dir.ps1` | pwsh long-path-safe recursive delete |
+| `status/check-headless-workers.ps1` | State + PR of each headless (Codex) worker. `-Json` |
+
+Dispatch and teardown scripts are deliberately not listed: they are the conductor's.
 
 ---
 
@@ -338,14 +251,14 @@ f021-referral        PASS   PASS   5/5           100%
 The orchestrator's poll cadence IS `/loop` (Contract 6). The dedicated orchestrator Claude
 (spawned by `start-orchestrator.ps1`) starts it itself:
 ```
-/loop 5m /session orchestrate poll
+/loop 5m /crew:orchestrate poll
 ```
 
 Each tick:
 - Computes the batch (Contract 2).
 - Reads and nudges live workers.
 - Reports green batch PRs as READY FOR USER REVIEW (never merges — Contract 1).
-- Cleans up worktrees whose PRs the user has merged, via `close-worker.ps1` (Contract 3).
+- Reports PRs the user has merged, and keeps their workers alive (Contract 3).
 - Self-terminates when no workers and no open batch PRs remain (Contract 4).
 
 The loop is session-only — it dies when Claude exits. Never replace it with a scheduled task

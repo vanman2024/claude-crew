@@ -155,6 +155,93 @@ Describe "Dispatch robustness: Windows PowerShell 5.1 (npm EBADENGINE killed dis
     }
 }
 
+Describe "One skill per role (conductor / orchestrator / reviewer)" {
+    BeforeAll {
+        $script:PluginRoot = Split-Path $script:ScriptsDir -Parent
+        $script:SkillsDir  = Join-Path $script:PluginRoot "skills"
+        function Get-SkillText([string]$Name) { Get-Content (Join-Path $script:SkillsDir "$Name\SKILL.md") -Raw }
+    }
+
+    It "<_> skill exists and its frontmatter name matches its folder" -ForEach @('session', 'orchestrate', 'review') {
+        (Get-SkillText $_) | Should -Match "(?m)^name: $_\s*$"
+    }
+
+    It "the conductor skill decides its role from .claude-bootstrap.md and takes the conductor role without it" {
+        $s = Get-SkillText 'session'
+        $s | Should -Match 'Which role are you'
+        $s | Should -Match '\.claude-bootstrap\.md'
+        $s | Should -Match 'you are the \*\*conductor\*\*'
+    }
+
+    It "the conductor skill covers <_>" -ForEach @('status', 'relay', 'local', 'merge', 'pull', 'done', 'launch') {
+        (Get-SkillText 'session') | Should -Match "(?m)^## ``$_"
+    }
+
+    It "the conductor watches the terminals (status watchdog loop), but never runs a per-worker monitor loop" {
+        $s = Get-SkillText 'session'
+        $s | Should -Not -Match '/loop \S+ /\S*session monitor'
+        $s | Should -Match '/loop 10m /crew:session status'
+        $s | Should -Match 'check-crew-health\.ps1'
+    }
+
+    It "the conductor relays through send-to-worker.ps1, not a bare send-keys with a message" {
+        $s = Get-SkillText 'session'
+        $s | Should -Match 'send-to-worker\.ps1'
+        $s | Should -Not -Match 'psmux send-keys -t <sess>:<name> "<message>"'
+    }
+
+    It "the conductor merges into the RESOLVED base and checks each PR's base first" {
+        $s = Get-SkillText 'session'
+        $s | Should -Match 'resolve-config\.ps1'
+        $s | Should -Match 'gh pr edit <n> --base <base>'
+    }
+
+    It "the <_> skill sends a non-owner back to /crew:session" -ForEach @('orchestrate', 'review') {
+        $s = Get-SkillText $_
+        $s | Should -Match '\.claude-bootstrap\.md'
+        $s | Should -Match '/crew:session'
+    }
+
+    It "the orchestrator brief runs /crew:orchestrate poll, in its /loop too" {
+        $body = Get-Content $script:OrchScript -Raw
+        $body | Should -Match '``/crew:orchestrate poll``'
+        $body | Should -Match '/loop \$\{IntervalMin\}m /crew:orchestrate poll'
+    }
+
+    It "the reviewer brief runs /crew:review, in its /loop too" {
+        $body = Get-Content $script:ReviewerScript -Raw
+        $body | Should -Match '``/crew:review``'
+        $body | Should -Match '/loop \$\{IntervalMin\}m /crew:review'
+    }
+
+    It "the orchestrator never tears workers down (brief + its reference)" {
+        $brief = Get-Content $script:OrchScript -Raw
+        $brief | Should -Not -Match 'CloseWorkerScript'
+        $brief | Should -Match 'NEVER tear down a worker'
+        $ref = Get-Content (Join-Path $script:SkillsDir "orchestrate\reference\commands-orchestrate.md") -Raw
+        $ref | Should -Not -Match 'close-worker\.ps1"? -Name'
+        $ref | Should -Not -Match 'tear down via `close-worker'
+    }
+
+    It "nothing still calls the old /session orchestrate|monitor|review form" {
+        $offenders = Get-ChildItem $script:PluginRoot -Recurse -Include *.md, *.ps1 |
+            Where-Object { $_.Name -ne 'CHANGELOG.md' -and $_.FullName -notmatch '\\tests\\' } |
+            Select-String -Pattern '/session (orchestrate|monitor|review)\b' |
+            ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+
+    It "every relative link in the skills resolves to a file" {
+        $broken = foreach ($md in (Get-ChildItem $script:SkillsDir -Recurse -Filter *.md)) {
+            foreach ($m in [regex]::Matches((Get-Content $md.FullName -Raw), '\]\(([^)#:\s]+\.md)(#[^)]*)?\)')) {
+                $target = Join-Path $md.DirectoryName $m.Groups[1].Value
+                if (-not (Test-Path $target)) { "{0} -> {1}" -f $md.FullName.Substring($script:SkillsDir.Length), $m.Groups[1].Value }
+            }
+        }
+        $broken -join "`n" | Should -BeNullOrEmpty
+    }
+}
+
 Describe "Orchestrator + reviewer launch with transcript saving on" {
     It "<_> clears CLAUDE_CODE_CHILD_SESSION and forces session persistence" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1') {
         $body = Get-Content (Join-Path $script:ScriptsDir "dispatch\$_") -Raw
@@ -236,5 +323,40 @@ Describe "start-orchestrator.ps1 auto-launches the reviewer" {
     It "excludes the reviewer infra worktrees from the batch" {
         $body = Get-Content $script:OrchScript -Raw
         $body | Should -Match 'review-checkout'
+    }
+}
+
+Describe "Get-PaneState (the watchdog's pane classifier)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "a bare pwsh prompt at the bottom means the CLI exited" {
+        (Get-PaneState -Lines @("some output", "", "PS C:\Users\me\proj>")).State | Should -Be "exited"
+    }
+
+    It "an empty pane counts as exited" {
+        (Get-PaneState -Lines @("", "  ")).State | Should -Be "exited"
+    }
+
+    It "typed-but-unsent input in Claude's box is pending, with the text in Detail (seen live)" {
+        $pane = @(
+            "✻ Cooked for 11s · done 2:16 AM",
+            "────────────────────",
+            "❯ WaitforCIonce1e085andreportback",
+            "────────────────────",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)"
+        )
+        $v = Get-PaneState -Lines $pane
+        $v.State  | Should -Be "pending"
+        $v.Detail | Should -Match 'WaitforCIonce1e085andreportback'
+    }
+
+    It "an empty input box with the footer is running" {
+        $pane = @("● Done.", "────────", "❯ ", "────────", "  ⏵⏵ bypass permissions on (shift+tab to cycle)")
+        (Get-PaneState -Lines $pane).State | Should -Be "running"
+    }
+
+    It "an old submitted prompt far above the bottom is not mistaken for pending input" {
+        $pane = @("❯ build the intake form") + @(1..10 | ForEach-Object { "working line $_" }) + @("❯ ", "  ⏵⏵ bypass permissions on")
+        (Get-PaneState -Lines $pane).State | Should -Be "running"
     }
 }

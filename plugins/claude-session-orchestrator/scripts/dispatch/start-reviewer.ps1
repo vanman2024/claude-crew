@@ -1,4 +1,4 @@
-﻿# start-reviewer.ps1
+# start-reviewer.ps1
 #
 # Spawns a dedicated Reviewer Claude in its own psmux window — the "overseer" that
 # verifies worker PRs one at a time as they go green, so nothing is merged blind.
@@ -6,7 +6,7 @@
 # It has TWO worktrees (both under <worktreesPath>, both project-agnostic):
 #   - HOME      <wt>\reviewer        detached at origin/<defaultBranch>. The Claude's
 #                                    stable cwd: holds .claude-bootstrap.md and the
-#                                    project's .claude/ tree (so /session resolves).
+#                                    project's .claude/ tree (so /crew:review resolves).
 #                                    NEVER checked out, NEVER committed to.
 #   - CHECKOUT  <wt>\review-checkout  where it actually checks out each PR branch,
 #                                    runs the project's tests, and runs /code-review
@@ -17,7 +17,7 @@
 # The reviewer is autonomous (no human watching the pane), so it runs with
 # --dangerously-skip-permissions. Its CONTRACT (no-merge, never touch main, verify
 # in its OWN checkout worktree, one PR at a time, ordered by file-overlap) is
-# enforced by its brief (.claude-bootstrap.md) — see reference/commands-review.md.
+# enforced by its brief (.claude-bootstrap.md) — see skills/review/reference/commands-review.md.
 #
 # Project-agnostic: all paths/session/branch/repo come from session-plugin.json.
 #
@@ -130,7 +130,7 @@ $briefPath = Join-Path $ReviewerHome ".claude-bootstrap.md"
 $brief = @"
 You are the **Reviewer Claude** (the overseer) for the $($cfg.projectName) parallel-build pipeline.
 
-Your cwd is **$ReviewerHome** — a git worktree detached at origin/$DefaultBranch. This is your STABLE HOME: never check out branches here, never commit here. You have the project's .claude/ tree from this checkout, so /session resolves.
+Your cwd is **$ReviewerHome** — a git worktree detached at origin/$DefaultBranch. This is your STABLE HOME: never check out branches here, never commit here. You have the project's .claude/ tree from this checkout, so /crew:review resolves.
 
 Your job: as worker PRs go green, verify them ONE AT A TIME in your dedicated checkout worktree so nothing is ever merged blind. You do NOT merge — you produce an ORDERED, VERIFIED queue and label each PR, then the user merges.
 
@@ -153,7 +153,7 @@ A. The project's tests pass when run against the PR branch in your checkout work
 $testLines
 B. ``/code-review`` against the checked-out PR head (it reviews the changes vs $DefaultBranch) finds no blocking (correctness/security) issues.
 
-REVIEW CYCLE (this is what ``/session review`` does — see reference/commands-review.md for the full protocol):
+REVIEW CYCLE (this is what ``/crew:review`` does — see its reference/commands-review.md for the full protocol):
 1. Compute the batch (above). Consider only PRs with green CI that you have not already marked READY-VERIFIED.
 2. ORDER them: PRs that share no files merge in any order; PRs that touch the same path must be sequenced (verify the lower PR number first). Use ``gh pr view <n> --json files`` to find overlap.
 3. Take the FIRST un-verified PR in that order. In the checkout worktree:
@@ -186,11 +186,11 @@ HARD RULES (do not violate):
 
 FIRST ACTION — run one immediate review cycle now so you have a current picture:
 
-``/session review``
+``/crew:review``
 
 THEN start the recurring loop:
 
-``/loop ${IntervalMin}m /session review``
+``/loop ${IntervalMin}m /crew:review``
 "@
 
 Set-Content -Path $briefPath -Value $brief -Encoding UTF8

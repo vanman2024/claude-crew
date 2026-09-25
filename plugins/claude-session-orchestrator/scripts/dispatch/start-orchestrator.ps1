@@ -4,7 +4,7 @@
 # its own git worktree at <worktreesPath>\orchestrator (detached HEAD at
 # origin/<defaultBranch> — never modified, never committed to). The worktree
 # exists so the orchestrator Claude has:
-#   - the project's .claude/ tree available (so /session resolves)
+#   - the project's .claude/ tree available (so /crew:orchestrate resolves)
 #   - a stable file context that does NOT swap when you git checkout in main
 #
 # The orchestrator is autonomous (no human watching the pane), so it runs with
@@ -44,9 +44,6 @@ $MainRepo             = $cfg.repoPath
 $WtBase               = $cfg.worktreesPath
 $DefaultBranch        = $cfg.defaultBranch
 $OrchestratorWorktree = Join-Path $WtBase "orchestrator"
-# Resolve the teardown script (sibling folder) so the brief can reference it by absolute path.
-$CloseWorkerScript    = (Join-Path $PSScriptRoot "..\teardown\close-worker.ps1")
-if (Test-Path $CloseWorkerScript) { $CloseWorkerScript = (Resolve-Path $CloseWorkerScript).Path }
 
 if (-not (Test-Path $ClaudeCmd))                            { Write-Error "claude.cmd not found at $ClaudeCmd (config.workerCmdPath)"; exit 1 }
 if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) { Write-Error "psmux not on PATH"; exit 1 }
@@ -111,14 +108,13 @@ CONTRACT (do not violate):
 5. ``gh pr list --repo $($cfg.githubRepo) --state open --json number,title,headRefName,statusCheckRollup,mergeable`` for PR status, then **filter to the batch** (see BATCH SCOPING) — ignore PRs whose branch is not in an active worktree.
 6. When a worker reports ``WORKTREE_STATUS: COMPLETE`` and its PR is open with green CI: report it as ``READY FOR USER REVIEW``. Do NOT merge.
 7. When a worker reports ``WORKTREE_STATUS: BLOCKED``: report the reason and stop nudging that worker.
-8. When a PR is observed merged (by the user) and its worker window still exists: run the teardown script
-   ``pwsh -NoProfile -ExecutionPolicy Bypass -File "$CloseWorkerScript" -Name <worker> -Config "$($cfg._configPath)"``
-   which detaches the node_modules junction(s) FIRST, kills the window, then removes the worktree.
+8. When a PR is observed merged (by the user): report it as ``MERGED``. Do NOT tear the worker down. The user keeps workers alive to iterate or take more tasks; teardown is the conductor's job (the user's own session), and only when the user says a worker is done.
 9. **Self-terminate** the loop when: no live worker windows AND no open PRs from this batch remain. Print a summary, exit the loop, exit Claude.
 
 HARD RULES:
 
-- NEVER run ``gh pr merge``. The user authorizes all merges via their conversational Claude.
+- NEVER run ``gh pr merge``. The user authorizes all merges through the conductor (their own session).
+- NEVER tear down a worker: no close-worker, no kill-window, no worktree remove.
 - NEVER run ``git checkout`` against the main repo at $MainRepo.
 - NEVER run ``git pull origin $DefaultBranch`` in the main repo.
 - NEVER modify or commit in this orchestrator worktree.
@@ -127,11 +123,11 @@ HARD RULES:
 
 FIRST ACTION — run one immediate poll right now so you have a current picture of workers + PRs before the loop's first interval:
 
-``/session orchestrate poll``
+``/crew:orchestrate poll``
 
 THEN start the recurring loop:
 
-``/loop ${IntervalMin}m /session orchestrate poll``
+``/loop ${IntervalMin}m /crew:orchestrate poll``
 "@
 
 Set-Content -Path $briefPath -Value $brief -Encoding UTF8
@@ -188,7 +184,7 @@ if (-not $NoReviewer) {
         Write-Host "[start-orchestrator] WARN: start-reviewer.ps1 not found next to this script; skipping reviewer." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "[start-orchestrator] -NoReviewer set — reviewer NOT launched. Start it later with /session review-start." -ForegroundColor DarkGray
+    Write-Host "[start-orchestrator] -NoReviewer set — reviewer NOT launched. Start it later with /crew:session review-start." -ForegroundColor DarkGray
 }
 
 

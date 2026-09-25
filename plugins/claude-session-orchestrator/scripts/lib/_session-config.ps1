@@ -84,8 +84,9 @@ function Get-SessionConfig {
         throw "Failed to parse $path as JSON: $($_.Exception.Message)"
     }
 
-    # Required scalar fields
-    $required = @("projectName", "repoPath", "worktreesPath", "psmuxSession", "githubRepo", "defaultBranch", "workerCmdPath", "layout")
+    # Required scalar fields. defaultBranch is NOT required - absent or "auto" means
+    # detect it (see Resolve-IntegrationBranch below).
+    $required = @("projectName", "repoPath", "worktreesPath", "psmuxSession", "githubRepo", "workerCmdPath", "layout")
     foreach ($key in $required) {
         if (-not ($cfg.PSObject.Properties.Name -contains $key) -or $null -eq $cfg.$key) {
             throw "session-plugin.json is missing required field '$key' (config: $path)"
@@ -98,9 +99,130 @@ function Get-SessionConfig {
         throw "session-plugin.json layout.type must be 'root' or 'monorepo-split', got '$($cfg.layout.type)'"
     }
 
+    # Resolve the integration branch every worker branches from and every PR targets.
+    $pinned = if (($cfg.PSObject.Properties.Name -contains "defaultBranch") -and $cfg.defaultBranch) { "$($cfg.defaultBranch)" } else { "" }
+    if (-not $pinned -or $pinned -eq "auto") {
+        $resolved = Resolve-IntegrationBranch -RepoPath $cfg.repoPath -GithubRepo $cfg.githubRepo
+        $cfg | Add-Member -NotePropertyName "defaultBranch" -NotePropertyValue $resolved.Branch -Force
+        $cfg | Add-Member -NotePropertyName "_defaultBranchSource" -NotePropertyValue "detected: $($resolved.Reason)" -Force
+    } else {
+        $cfg | Add-Member -NotePropertyName "_defaultBranchSource" -NotePropertyValue "pinned in config" -Force
+        Test-PinnedBranchSuspicious -Pinned $pinned -RepoPath $cfg.repoPath
+    }
+
     # Stash the resolved config path so callers can report it.
     $cfg | Add-Member -NotePropertyName "_configPath" -NotePropertyValue $path -Force
     return $cfg
+}
+
+# --- Integration branch -------------------------------------------------------
+# GitHub's default branch is often NOT where work lands: a feature -> staging ->
+# master repo has master as its GitHub default, and a config that copied it sent
+# worker PRs straight to master. So the branch is read from what the repo actually
+# does, in this order:
+#   1. The base most recent merged FEATURE PRs targeted (release PRs whose head is
+#      itself a long-lived branch, e.g. staging -> master, are ignored).
+#   2. No PR history: an integration branch that exists on origin (staging, develop, dev).
+#   3. origin's default branch.
+# Pure: takes the facts, returns @{ Branch; Reason }. Resolve-IntegrationBranch
+# gathers the facts.
+function Select-IntegrationBranch {
+    param(
+        [object[]]$MergedPrs = @(),
+        [string[]]$RemoteBranches = @(),
+        [string]$OriginHead
+    )
+    $longLived = @("main", "master", "staging", "develop", "dev", "production", "release")
+    $bases = @($MergedPrs |
+        Where-Object { $_ -and $_.baseRefName -and ($_.headRefName -notin $longLived) } |
+        ForEach-Object { "$($_.baseRefName)" })
+    # A base that no longer exists on origin can't be branched from.
+    if ($RemoteBranches.Count -gt 0) { $bases = @($bases | Where-Object { $_ -in $RemoteBranches }) }
+
+    if ($bases.Count -gt 0) {
+        # Tally in first-seen order (PRs arrive newest first); a strict > keeps the earlier
+        # entry on a tie, so a tie goes to the most recently used base. (Group-Object
+        # sorts by name, which would silently break the tie alphabetically.)
+        $counts = [ordered]@{}
+        foreach ($b in $bases) { $counts[$b] = 1 + [int]$counts[$b] }
+        $topName = $null; $topCount = 0
+        foreach ($k in $counts.Keys) { if ($counts[$k] -gt $topCount) { $topName = $k; $topCount = $counts[$k] } }
+        return [pscustomobject]@{ Branch = $topName; Reason = "$topCount of the last $($bases.Count) merged feature PRs targeted it" }
+    }
+    foreach ($candidate in @("staging", "develop", "dev")) {
+        if ($candidate -in $RemoteBranches) {
+            return [pscustomobject]@{ Branch = $candidate; Reason = "no merged PR history; origin has '$candidate'" }
+        }
+    }
+    if ($OriginHead) { return [pscustomobject]@{ Branch = $OriginHead; Reason = "origin's default branch" } }
+    return [pscustomobject]@{ Branch = "main"; Reason = "nothing detectable; fell back to 'main'" }
+}
+
+function Get-OriginBranchFacts {
+    param([string]$RepoPath)
+    $facts = @{ RemoteBranches = @(); OriginHead = "" }
+    if (-not $RepoPath -or -not (Test-Path (Join-Path $RepoPath ".git"))) { return $facts }
+    $facts.RemoteBranches = @(git -C $RepoPath for-each-ref --format='%(refname:strip=3)' refs/remotes/origin 2>$null |
+        Where-Object { $_ -and $_ -ne "HEAD" })
+    $head = git -C $RepoPath symbolic-ref --short refs/remotes/origin/HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $head) { $facts.OriginHead = ("$head" -replace '^origin/', '').Trim() }
+    return $facts
+}
+
+function Resolve-IntegrationBranch {
+    param([string]$RepoPath, [string]$GithubRepo)
+    if (-not (Test-Path variable:script:IntegrationBranchCache)) { $script:IntegrationBranchCache = @{} }
+    $key = "$RepoPath|$GithubRepo"
+    if ($script:IntegrationBranchCache.ContainsKey($key)) { return $script:IntegrationBranchCache[$key] }
+
+    $facts = Get-OriginBranchFacts -RepoPath $RepoPath
+    $merged = @()
+    if ($GithubRepo -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+        try {
+            $json = gh pr list --repo $GithubRepo --state merged --limit 30 --json baseRefName,headRefName 2>$null
+            if ($LASTEXITCODE -eq 0 -and $json) { $merged = @($json | ConvertFrom-Json) }
+        } catch { $merged = @() }   # offline / not authed: fall through to the branch facts
+    }
+    $result = Select-IntegrationBranch -MergedPrs $merged -RemoteBranches $facts.RemoteBranches -OriginHead $facts.OriginHead
+    $script:IntegrationBranchCache[$key] = $result
+    return $result
+}
+
+# --- Pane health ------------------------------------------------------------------
+# Classify a psmux pane capture for the conductor's health check. Pure (text in,
+# verdict out) so it is testable without psmux.
+#   exited  - the pane's last line is a bare shell prompt: the CLI inside has quit.
+#   pending - the CLI's input box holds typed-but-unsent text, which blocks /loop
+#             prompts and nudges from landing.
+#   running - anything else.
+function Get-PaneState {
+    param([string[]]$Lines)
+    $content = @($Lines | Where-Object { $_ -and $_.Trim() })
+    if ($content.Count -eq 0) { return [pscustomobject]@{ State = "exited"; Detail = "empty pane" } }
+    $last = $content[-1].TrimEnd()
+    if ($last -match '^PS [A-Za-z]:\\[^>]*>\s*$' -or $last -match '^[A-Za-z]:\\[^>]*>\s*$') {
+        return [pscustomobject]@{ State = "exited"; Detail = "shell prompt: the CLI is not running" }
+    }
+    # Claude Code's input line is "❯ <text>" between two rules; look near the bottom only.
+    $tail = @($content | Select-Object -Last 6)
+    $inputLine = $tail | Where-Object { $_ -match '^\s*❯\s+\S' } | Select-Object -Last 1
+    if ($inputLine) {
+        return [pscustomobject]@{ State = "pending"; Detail = "unsent input: $($inputLine.Trim())" }
+    }
+    return [pscustomobject]@{ State = "running"; Detail = "" }
+}
+
+# A pinned defaultBranch is honoured, but the common mistake - pinning GitHub's default
+# (main/master) in a repo that has a staging/develop integration branch - is flagged.
+# Local git only, so it costs nothing.
+function Test-PinnedBranchSuspicious {
+    param([string]$Pinned, [string]$RepoPath)
+    if ($Pinned -notin @("main", "master")) { return }
+    $facts = Get-OriginBranchFacts -RepoPath $RepoPath
+    $integration = @("staging", "develop", "dev") | Where-Object { $_ -in $facts.RemoteBranches } | Select-Object -First 1
+    if ($integration) {
+        Write-Warning "session-plugin.json pins defaultBranch '$Pinned', but origin also has '$integration'. If work merges into '$integration' first, set defaultBranch to `"auto`" (or remove it) so it is detected."
+    }
 }
 
 # --- Derived helpers ----------------------------------------------------------

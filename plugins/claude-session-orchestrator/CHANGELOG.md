@@ -5,6 +5,39 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **One skill per role.** The user's own session, the orchestrator and the reviewer all
+  loaded the same `/crew:session` skill, which addressed its reader as the orchestrator. So
+  the user's session never knew it was the one meant to relay feedback, bring changes
+  local, merge and pull, and ran orchestrator-style sweeps instead. Now:
+  - **`/crew:session` is the conductor** (the user's session). It opens with a role check:
+    with no `.claude-bootstrap.md` in the working directory it is the conductor and acts as
+    one. New subcommands: `status`, `launch`, `relay`, `local`, `merge`, `done`.
+  - **`/crew:orchestrate`** (poll, monitor, verify) and **`/crew:review`** (one review cycle)
+    are the overseers' skills. Their briefs and `/loop`s call them; their references moved
+    with them.
+- **The orchestrator no longer tears workers down after a merge.** Its brief and its
+  reference told it to run `close-worker.ps1` on merged PRs, contradicting "workers stay
+  alive until the user says done". It now reports `MERGED`; teardown is the conductor's
+  `done`, on the user's word. `pull` lists landed workers and asks, instead of removing them.
+
+### Added
+- **`defaultBranch` is detected** (`"auto"` or absent): from where merged feature PRs actually
+  landed (release PRs such as staging → master ignored), else a `staging`/`develop`/`dev`
+  branch on origin, else origin's default. `session-init` copied GitHub's default branch, which
+  is `master` in a feature → staging → master repo, so worker PRs targeted the wrong branch.
+  A pinned `main`/`master` next to a `staging`/`develop` branch now warns.
+  `status/resolve-config.ps1` prints what was resolved and why.
+- **The conductor watches the terminals.** `status/check-crew-health.ps1` reports every
+  expected window (orchestrator, reviewer, each worker) as `running`, `pending` (unsent text
+  blocking its input box), `exited` (CLI quit to a shell prompt) or `missing`, with a pane hash
+  to spot a stalled loop. `/crew:session launch` starts `/loop 10m /crew:session status`, which
+  restarts dead overseers and asks before resuming workers.
+- **`dispatch/send-to-worker.ps1`**: relays a message as one argument, presses Enter
+  separately, and verifies it was submitted. A bare `psmux send-keys` with separate words
+  lost its spaces and its Enter, leaving `WaitforCIonce1e085andreportback` unsent in a live
+  worker's box.
+
 ### Fixed
 - **Dispatch no longer dies mid `npm install` under Windows PowerShell 5.1.** Every
   documented invocation used `powershell.exe` (5.1). There, any PowerShell-side redirect

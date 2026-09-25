@@ -174,6 +174,82 @@ Describe "Get-SessionConfig" {
     }
 }
 
+Describe "Integration branch (defaultBranch) resolution" {
+
+    Context "Select-IntegrationBranch (pure)" {
+        It "follows where merged feature PRs actually landed (feature -> staging -> master repo)" {
+            $prs = @(
+                [pscustomobject]@{ headRefName = "fix/12-a"; baseRefName = "staging" },
+                [pscustomobject]@{ headRefName = "staging";  baseRefName = "master" },   # release PR - ignored
+                [pscustomobject]@{ headRefName = "feat/b";   baseRefName = "staging" }
+            )
+            $r = Select-IntegrationBranch -MergedPrs $prs -RemoteBranches @("master", "staging") -OriginHead "master"
+            $r.Branch | Should -Be "staging"
+            $r.Reason | Should -Match "2 of the last 2"
+        }
+
+        It "ignores release PRs even when they outnumber nothing else" {
+            $prs = @([pscustomobject]@{ headRefName = "staging"; baseRefName = "master" })
+            (Select-IntegrationBranch -MergedPrs $prs -RemoteBranches @("master", "staging") -OriginHead "master").Branch |
+                Should -Be "staging"   # no feature history -> origin's integration branch
+        }
+
+        It "ignores a PR base that no longer exists on origin" {
+            $prs = @([pscustomobject]@{ headRefName = "feat/x"; baseRefName = "old-integration" })
+            (Select-IntegrationBranch -MergedPrs $prs -RemoteBranches @("main") -OriginHead "main").Branch | Should -Be "main"
+        }
+
+        It "breaks a tie toward the most recently used base (PRs arrive newest first)" {
+            $prs = @(
+                [pscustomobject]@{ headRefName = "feat/new"; baseRefName = "staging" },
+                [pscustomobject]@{ headRefName = "feat/old"; baseRefName = "master" }
+            )
+            (Select-IntegrationBranch -MergedPrs $prs -RemoteBranches @("master", "staging")).Branch | Should -Be "staging"
+        }
+
+        It "with no PR history, prefers an integration branch on origin, then origin's default, then main" {
+            (Select-IntegrationBranch -RemoteBranches @("main", "develop") -OriginHead "main").Branch | Should -Be "develop"
+            (Select-IntegrationBranch -RemoteBranches @("trunk") -OriginHead "trunk").Branch        | Should -Be "trunk"
+            (Select-IntegrationBranch).Branch                                                        | Should -Be "main"
+        }
+    }
+
+    Context "Get-SessionConfig" {
+        BeforeEach {
+            $script:Root = Join-Path ([System.IO.Path]::GetTempPath()) ("sess-branch-" + [System.Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path (Join-Path $script:Root ".claude") -Force | Out-Null
+            $script:WriteCfg = {
+                param($Branch)
+                $c = [ordered]@{ projectName = "X"; repoPath = $script:Root; worktreesPath = "w"; psmuxSession = "x"
+                                 githubRepo = "o/r"; workerCmdPath = "c"; layout = @{ type = "root" } }
+                if ($null -ne $Branch) { $c.defaultBranch = $Branch }
+                $c | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $script:Root ".claude\session-plugin.json")
+            }
+            Mock Resolve-IntegrationBranch { [pscustomobject]@{ Branch = "staging"; Reason = "mocked" } }
+        }
+
+        It "detects the branch when defaultBranch is absent" {
+            & $script:WriteCfg $null
+            $cfg = Get-SessionConfig -RepoPath $script:Root
+            $cfg.defaultBranch        | Should -Be "staging"
+            $cfg._defaultBranchSource | Should -Be "detected: mocked"
+        }
+
+        It "detects the branch when defaultBranch is ""auto""" {
+            & $script:WriteCfg "auto"
+            (Get-SessionConfig -RepoPath $script:Root).defaultBranch | Should -Be "staging"
+        }
+
+        It "honours a pinned defaultBranch without detecting" {
+            & $script:WriteCfg "release-2"
+            $cfg = Get-SessionConfig -RepoPath $script:Root
+            $cfg.defaultBranch        | Should -Be "release-2"
+            $cfg._defaultBranchSource | Should -Be "pinned in config"
+            Should -Invoke Resolve-IntegrationBranch -Times 0
+        }
+    }
+}
+
 Describe "Get-EnvFileMappings" {
 
     It "monorepo-split: joins part.path with each env file, backslash-normalized" {

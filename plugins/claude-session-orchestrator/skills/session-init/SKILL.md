@@ -18,8 +18,6 @@ Run these in the project the user is in:
 
 ```bash
 git rev-parse --show-toplevel          # -> repoPath (absolute)
-git rev-parse --abbrev-ref HEAD        # current branch (hint for defaultBranch)
-git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null   # -> origin's default branch (best source for defaultBranch)
 gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null   # -> githubRepo (owner/name)
 where.exe claude 2>/dev/null           # -> workerCmdPath candidate (prefer the .cmd)
 ```
@@ -29,7 +27,7 @@ Derive:
 - `projectName` = the leaf folder name of repoPath (let the user override).
 - `worktreesPath` = sibling dir `<repoParent>\<leaf>-worktrees` (the proven convention — worktrees live OUTSIDE the repo).
 - `psmuxSession` = lowercased `projectName` with non-alphanumerics stripped.
-- `defaultBranch` = origin's default branch if detected, else the current branch, else `main`.
+- `defaultBranch` = `"auto"`. Do NOT copy GitHub's default branch: in a feature → staging → master repo that is `master`, and every worker PR would target the wrong branch. `"auto"` is resolved each run from where merged feature PRs actually land. Pin a branch name only if the user asks to.
 - `githubRepo` = from `gh` if available, else ask.
 - `workerCmdPath` = the `.cmd` from `where.exe claude`; if only a non-.cmd path is found, prefer `C:\Users\<you>\AppData\Roaming\npm\claude.cmd`. Confirm it exists.
 - `workerCli` (optional) = which agent CLI the workers run. **Default: omit it (= the `claude` preset).** Only ask about this if the user wants non-Claude workers.
@@ -159,8 +157,9 @@ ls docs specs 2>/dev/null; ls *.md
 
 Write `<repoPath>\.claude\session-plugin.json` (create `.claude` if needed) with
 exactly the schema shown in the examples. Required top-level keys:
-`projectName, repoPath, worktreesPath, psmuxSession, githubRepo, defaultBranch,
-workerCmdPath, layout`. Optional: `devServer`, `teams`, `dataFlow`, `docs`, `browserVerify`, `review`,
+`projectName, repoPath, worktreesPath, psmuxSession, githubRepo,
+workerCmdPath, layout`. Also write `"defaultBranch": "auto"` (optional; absent means the same).
+Optional: `devServer`, `teams`, `dataFlow`, `docs`, `browserVerify`, `review`,
 `workerCli`, `worktreeDeps`.
 
 > `worktreeDeps` (optional) controls how each worker worktree gets its `node_modules`:
@@ -181,7 +180,12 @@ by loading it:
 pwsh -NoProfile -ExecutionPolicy Bypass -Command ". '${CLAUDE_PLUGIN_ROOT}/scripts/lib/_session-config.ps1'; Get-SessionConfig -RepoPath '<repoPath>' | ConvertTo-Json -Depth 6"
 ```
 
-If it throws, fix the field it names and re-write.
+If it throws, fix the field it names and re-write. Then show the user which integration
+branch was resolved and why:
+
+```bash
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/resolve-config.ps1" -RepoPath '<repoPath>'
+```
 
 ## Step 6 — Preflight + next steps
 
@@ -197,18 +201,15 @@ Then print the next steps:
 Config written: <repoPath>\.claude\session-plugin.json
 
 Try it:
-  /session list
-  /session start <feature-name>
-  /session start-issues 510 511 512
-  /session orchestrate           (dashboard)
-
-Launch the autonomous orchestrator (its own window, /loop polling, no auto-merge):
-  pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -Config "<repoPath>\.claude\session-plugin.json"
+  /crew:session start <feature-name>
+  /crew:session start-issues 510 511 512
+  /crew:session launch           (orchestrator + reviewer, if not already running)
+  /crew:session status
 ```
 
 ## Notes
 
 - Do NOT commit secrets — `.claude/session-plugin.json` holds only paths and the
   github repo slug, no tokens. It's safe to commit so the whole team shares it.
-- Re-running `/session-init` updates the file (show a diff and confirm before overwriting an existing config).
+- Re-running `/crew:session-init` updates the file (show a diff and confirm before overwriting an existing config).
 
