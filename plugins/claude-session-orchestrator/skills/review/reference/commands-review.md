@@ -132,7 +132,7 @@ checked-out PR head (reviews its changes vs `<base>`).
   ```
   If the worker window is still live, nudge it:
   ```bash
-  psmux send-keys -t <sess>:<worker> "Review found: <one-line fix>. Fix on this branch and push." Enter
+  pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <worker> -Message "Review found: <one-line fix>. Fix on this branch and push." -Config "<repo>/.claude/session-plugin.json"
   ```
   Do not re-verify until a new commit is pushed.
 

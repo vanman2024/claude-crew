@@ -100,7 +100,7 @@ From its own detached worktree window it runs `/crew:orchestrate poll` every N m
 2. Detect state — **working** (no action), **waiting for input** (answer it),
    **stuck** (nudge), **errored** (report/correct), **done** (PR opened → flag
    `READY FOR USER REVIEW`, stop polling that worker).
-3. Send nudges via `psmux send-keys -t <sess>:<name> "<msg>" Enter`.
+3. Send nudges via `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "<msg>" -Config "<repo>/.claude/session-plugin.json"`.
 4. Flag green, mergeable PRs in the batch as ready. **It never merges.**
 5. After **you** merge a PR, it reports it `MERGED`. The worker stays alive until you say it is done.
 6. Self-terminates when no live workers and no open batch PRs remain.
@@ -201,7 +201,7 @@ Ctrl+B + z                # zoom pane
 
 # Orchestration (capture + steer — no focus theft)
 psmux capture-pane -t <sess>:<name> -p
-psmux send-keys -t <sess>:<name> "msg" Enter
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "msg" -Config "<repo>/.claude/session-plugin.json"
 
 # Cleanup
 # (prefer close-worker.ps1 for worktree teardown — junction-first)

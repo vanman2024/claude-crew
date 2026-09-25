@@ -4,11 +4,11 @@
 # SUBMITTED, not left sitting in the input box.
 #
 # Why a script and not a bare `psmux send-keys`: a message passed as separate words
-# (e.g. from bash without quotes) arrives with its spaces stripped, and a missed Enter
-# leaves it unsent, which silently blocks that window's /loop and later nudges. Seen
-# live: "WaitforCIonce1e085andreportback" sitting unsent in a worker's input box. Here
-# the message goes as ONE argument, Enter is a separate call, and the pane is checked
-# afterwards (Get-PaneState must not say "pending").
+# (e.g. from bash without quotes) arrives with its spaces stripped, and a single submit
+# keypress is sometimes eaten, so the text sits unsent and silently blocks that window's
+# /loop and later nudges. Seen live: "WaitforCIonce1e085andreportback" in a worker's input
+# box. Here the message goes as ONE argument through Send-PaneMessage, which waits for it to
+# show in the box and submits until it leaves.
 #
 # Usage:
 #   send-to-worker.ps1 -Name <window> -Message "<one line>" -Config <repo>\.claude\session-plugin.json
@@ -32,21 +32,12 @@ if ($Name -notin $windows) { Write-Host "SEND_FAILED: no window '$target'"; exit
 
 $before = Get-PaneState -Lines @(psmux capture-pane -t $target -p -S -60 2>$null)
 if ($before.State -eq "exited")  { Write-Host "SEND_FAILED: $target has no CLI running ($($before.Detail))"; exit 1 }
+if ($before.State -eq "dialog")  { Write-Host "SEND_FAILED: $target is $($before.Detail) - answer it first"; exit 1 }
 if ($before.State -eq "pending") { Write-Host "SEND_FAILED: $target already has $($before.Detail) - clear or submit it first"; exit 1 }
 
 # A newline would submit a partial message; flatten to one line.
 $line = ($Message -replace '\r?\n', ' ').Trim()
-psmux send-keys -t $target $line
-Start-Sleep -Milliseconds 500
-psmux send-keys -t $target Enter
-Start-Sleep -Seconds 3
-
+[void](Send-PaneMessage -Target $target -Text $line -MaxWaitSec 30)
 $after = Get-PaneState -Lines @(psmux capture-pane -t $target -p -S -60 2>$null)
-if ($after.State -eq "pending") {
-    # Some TUIs swallow the first Enter while redrawing; one retry.
-    psmux send-keys -t $target Enter
-    Start-Sleep -Seconds 3
-    $after = Get-PaneState -Lines @(psmux capture-pane -t $target -p -S -60 2>$null)
-}
 if ($after.State -ne "running") { Write-Host "SEND_FAILED: $target is '$($after.State)' after sending ($($after.Detail))"; exit 1 }
 Write-Host "SENT: $target <- $line"

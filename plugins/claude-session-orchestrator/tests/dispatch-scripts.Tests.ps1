@@ -414,3 +414,139 @@ Describe "Spec -> issues: plan never invents, and the spec reaches the worker" {
         $script:PlanRef | Should -Match '--body-file'
     }
 }
+
+Describe "Overseer launch: boot handshake + same plugin copy (found by dogfooding)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "a pane stuck on the folder-trust screen is 'dialog', not running (captured live)" {
+        $pane = @(
+            "Accessingworkspace:",
+            "C:\...\app-worktrees\orchestrator",
+            "Quicksafetycheck:Isthisaprojectyoucreatedoroneyoutrust?",
+            "Securityguide",
+            "❯No,exit",
+            "Yes,Itrustthisfolder",
+            "Entertoconfirm·Esctocancel"
+        )
+        (Get-PaneState -Lines $pane).State | Should -Be "dialog"
+    }
+
+    It "<_> waits on the shared boot handshake instead of a blind sleep" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1', 'psmux-dispatch.ps1') {
+        $body = Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw
+        $body | Should -Match 'Wait-CliReady -Target'
+        $body | Should -Not -Match 'Start-Sleep -Seconds 8'
+    }
+
+    It "<_> launches Claude with --plugin-dir of its own plugin copy" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1', 'psmux-dispatch.ps1', 'dispatch-worktree.ps1') {
+        (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'Get-PluginDirArg'
+    }
+
+    It "Get-PluginRoot resolves to the folder holding this plugin's manifest" {
+        Test-Path (Join-Path (Get-PluginRoot) ".claude-plugin\plugin.json") | Should -BeTrue
+        Get-PluginDirArg | Should -Match '^--plugin-dir ".+claude-session-orchestrator"$'
+    }
+}
+
+Describe "Boot handshake answers first-run screens by navigation (captured live)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "the claude preset answers folder trust and the bypass warning by choosing an option, not by sending a digit" {
+        $p = Get-WorkerCliPreset -Name 'claude'
+        @($p.acceptScreens | ForEach-Object { $_.choose }) | Should -Contain 'Yes,Itrustthisfolder'
+        @($p.acceptScreens | ForEach-Object { $_.choose }) | Should -Contain 'Yes,Iaccept'
+        # "2" + Enter on the unnumbered trust screen picked "No, exit" and quit Claude.
+        $p.acceptSend | Should -BeNullOrEmpty
+    }
+
+    It "Wait-CliReady presses Down until the chosen option is highlighted, then Enter" {
+        $frames = [System.Collections.Generic.Queue[object]]::new()
+        $frames.Enqueue(@(" Security guide", " ❯ No, exit", "   Yes, I trust this folder", " Enter to confirm · Esc to cancel"))
+        $frames.Enqueue(@(" Security guide", "   No, exit", " ❯ Yes, I trust this folder", " Enter to confirm · Esc to cancel"))
+        $frames.Enqueue(@("❯ ", "  ⏵⏵ bypass permissions on (shift+tab to cycle)"))
+        $sent = [System.Collections.Generic.List[string]]::new()
+        # A stub defined here is what Wait-CliReady resolves (dynamic scoping), so no
+        # psmux is needed on the test machine.
+        function psmux {
+            if ($args[0] -eq 'capture-pane') { return $frames.Dequeue() }
+            if ($args[0] -eq 'send-keys') { $sent.Add(($args[3..($args.Count - 1)] -join ' ')) }
+        }
+        Mock Start-Sleep {}
+        $r = Wait-CliReady -Target 't:w' -Cli (Get-WorkerCliPreset -Name 'claude') -MaxWaitSec 30 6>$null
+        $r.Ready | Should -BeTrue
+        ($sent -join ',') | Should -Be 'Down,Enter'
+    }
+
+    It "the idle placeholder hint in Claude's input line is not unsent input (captured live)" {
+        $pane = @("● security: hooks.json: unknown key ""notes"" ignored", "────", "❯ Try ""how do I log an error?""", "────", "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents")
+        (Get-PaneState -Lines $pane).State | Should -Be "running"
+    }
+}
+
+Describe "Messages are sent through the verified path, not a bare send-keys + Enter (found by dogfooding)" {
+    It "<_> submits with C-m" -ForEach @('psmux-dispatch.ps1', 'send-to-worker.ps1', 'start-orchestrator.ps1', 'start-reviewer.ps1') {
+        # A single blind submit left every brief in a live launch sitting unsent.
+        $offenders = Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") |
+            Where-Object { $_ -match '^\s*(if \(.*\) \{ )?psmux send-keys .*\bEnter\b' }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+
+    It "the overseers nudge workers through send-to-worker.ps1" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1') {
+        (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'send-to-worker\.ps1'
+    }
+
+    It "no skill tells anyone to nudge with a bare send-keys ... Enter" {
+        $offenders = Get-ChildItem (Join-Path $PSScriptRoot "..\skills") -Recurse -Filter *.md |
+            Select-String -Pattern 'send-keys -t <sess>:<\w+> "[^"]*" Enter' |
+            ForEach-Object { "{0}:{1}" -f $_.Filename, $_.LineNumber }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Send-PaneMessage: see the text, submit, retry until it leaves the box (captured live)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "waits past the empty-box render lag, and retries the eaten first submit" {
+        $R = '────────────────────────────────────────'
+        $frames = [System.Collections.Generic.Queue[object]]::new()
+        $frames.Enqueue(@($R, "❯", $R, "  ⏵⏵ bypass permissions on"))                                                  # text not drawn yet
+        $frames.Enqueue(@($R, "❯ Read .claude-bootstrap.md and follow it exactly.", "", $R, "  ⏵⏵ bypass permissions on"))  # text visible
+        $frames.Enqueue(@($R, "❯ Read .claude-bootstrap.md and follow it exactly.", "", $R, "  ⏵⏵ bypass permissions on"))  # 1st C-m eaten
+        $frames.Enqueue(@("✢ Gusting…", $R, "❯", $R, "  ⏵⏵ bypass permissions on · esc to interrupt"))                  # 2nd C-m went
+        $sent = [System.Collections.Generic.List[string]]::new()
+        function psmux {
+            if ($args[0] -eq 'capture-pane') { return $frames.Dequeue() }
+            if ($args[0] -eq 'send-keys') { $sent.Add($args[-1]) }
+        }
+        Mock Start-Sleep {}
+        Send-PaneMessage -Target 't:w' -Text "Read .claude-bootstrap.md and follow it exactly." 6>$null | Should -BeTrue
+        ($sent -join ' | ') | Should -Be 'Read .claude-bootstrap.md and follow it exactly. | C-m | C-m'
+    }
+
+    It "an empty box before the text has appeared is NOT success (the bug that passed a stuck brief)" {
+        $R = '────────────────────────────────────────'
+        Get-InputBoxText -Lines @($R, "❯", $R) | Should -Be ""
+        Get-InputBoxText -Lines @($R, "❯ Read .claude-bootstrap.md", "", $R) | Should -Be "Read.claude-bootstrap.md"
+        Get-InputBoxText -Lines @($R, "❯ Try ""how do I log an error?""", $R) | Should -Be ""
+        Get-InputBoxText -Lines @("no box here") | Should -BeNullOrEmpty
+    }
+
+    It "<_> sends its brief through Send-PaneMessage" -ForEach @('psmux-dispatch.ps1', 'start-orchestrator.ps1', 'start-reviewer.ps1', 'send-to-worker.ps1') {
+        (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'Send-PaneMessage -Target'
+    }
+}
+Describe "Test-InputSubmitted needs positive evidence (captured live)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "busy footer counts as submitted" {
+        Test-InputSubmitted -Lines @("✽ Levitating… (1m 18s)", "❯", "  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt") | Should -BeTrue
+    }
+    It "an empty box counts as submitted" {
+        Test-InputSubmitted -Lines @("● Done.", "❯ ", "  ⏵⏵ bypass permissions on") | Should -BeTrue
+    }
+    It "text still in the box is not submitted" {
+        Test-InputSubmitted -Lines @("❯ Read .claude-bootstrap.md and follow it exactly.", "  ⏵⏵ bypass permissions on") | Should -BeFalse
+    }
+    It "startup output with the input line out of view is NOT taken as submitted" {
+        Test-InputSubmitted -Lines @("● planning: hooks.json: unknown key ""notes"" ignored", "● agents-md: no CLAUDE.md found; AGENTS.md loaded") | Should -BeFalse
+    }
+}

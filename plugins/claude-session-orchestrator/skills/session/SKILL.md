@@ -130,7 +130,8 @@ you run when the user asks how it's going.
    | State | Meaning | What you do |
    |---|---|---|
    | `running` | CLI is up | Compare `PaneHash` with last tick: an **overseer** whose pane hasn't changed across a tick has a stalled loop → look at it (`capture-pane`) and restart it (`launch`) if it's hung |
-   | `pending` | Text sits unsent in its input box: its loop and every nudge are blocked | Show the user the text (`Detail`). Submit it if it's clearly an intended instruction, else clear it (`psmux send-keys -t <sess>:<name> C-u`) |
+   | `pending` | Text sits unsent in its input box: its loop and every nudge are blocked | Show the user the text (`Detail`). Submit it if it's clearly an intended instruction (`psmux send-keys -t <sess>:<name> C-m`; the first submit is sometimes eaten, so re-check and press again), else clear it (`C-u`) |
+   | `dialog` | Stuck on a first-run screen (folder trust / bypass warning); it will never read its brief | `capture-pane` to read it. Its options are a menu, not numbered: `psmux send-keys -t <sess>:<name> Down` until `❯` is on the "Yes" option (re-capture to check), then `Enter`. Then send its brief line with `send-to-worker.ps1` (`Read .claude-bootstrap.md and follow it exactly.`) |
    | `exited` | Window is there, CLI has quit | Overseer → `launch`. Worker → `resume <name>` |
    | `missing` | No window | Overseer → `launch`. Worker whose PR is open or unstarted → `resume <name>` (ask first). Worker whose PR merged → dormant, just count it |
 

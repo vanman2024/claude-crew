@@ -11,6 +11,7 @@
 # State:
 #   missing  - no psmux window (never launched, killed, or the psmux server died)
 #   exited   - the window is there but its CLI has quit (bare shell prompt)
+#   dialog   - stuck on a first-run screen (folder trust / bypass warning)
 #   pending  - text typed into the CLI's input box and never sent; blocks the loop
 #   running  - the CLI is up. Whether it is PROGRESSING needs two checks: compare
 #              PaneHash with the previous run (unchanged across the loop interval = stalled)
@@ -44,8 +45,16 @@ foreach ($line in (git -C $cfg.repoPath worktree list --porcelain 2>$null)) {
     }
 }
 
-$sessionAlive = [bool](psmux ls 2>$null | Select-String -SimpleMatch "${sess}:")
-$windows = if ($sessionAlive) { @(psmux list-windows -t $sess -F '#{window_name}' 2>$null) } else { @() }
+# psmux occasionally answers `ls` with nothing for a moment (seen live: one check said the
+# session was NOT RUNNING while it was up). The conductor relaunches overseers that look
+# missing, so a single empty answer is retried before it is believed.
+$sessionAlive = $false; $windows = @()
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $sessionAlive = [bool](psmux ls 2>$null | Select-String -SimpleMatch "${sess}:")
+    if ($sessionAlive) { $windows = @(psmux list-windows -t $sess -F '#{window_name}' 2>$null) }
+    if ($sessionAlive -and $windows.Count -gt 0) { break }
+    Start-Sleep -Seconds 2
+}
 
 $expected = @(
     @{ Name = "orchestrator"; Role = "orchestrator" },

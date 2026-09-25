@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory=$true)]
     [string]$Name,
 
@@ -90,7 +90,7 @@ $fullPrompt = $planPrefix + $Prompt
 $promptFile = Join-Path $logDir "$Name.prompt.txt"
 Set-Content -Path $promptFile -Value $fullPrompt -Encoding UTF8
 
-$argString = "-p --output-format stream-json --verbose --dangerously-skip-permissions"
+$argString = "-p --output-format stream-json --verbose --dangerously-skip-permissions $(Get-PluginDirArg)"
 if ($Continue) {
     $argString += " --continue"
 }

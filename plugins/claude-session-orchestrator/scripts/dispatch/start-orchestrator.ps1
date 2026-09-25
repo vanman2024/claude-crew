@@ -104,7 +104,7 @@ CONTRACT (do not violate):
 1. Every $IntervalMin minutes, poll the worker panes.
 2. ``psmux list-windows -t $Session`` to see live workers. Skip the infra windows: yourself (``$Window``) and ``reviewer``.
 3. For each worker: ``psmux capture-pane -t ${Session}:<worker> -p`` and analyze state.
-4. ``psmux send-keys -t ${Session}:<worker> "<nudge>" Enter`` to steer stuck workers.
+4. Steer stuck workers with ``pwsh -NoProfile -File "$(Join-Path (Get-PluginRoot) 'scripts\dispatch\send-to-worker.ps1')" -Name <worker> -Message "<nudge>" -Config "$($cfg._configPath)"``. It submits the message and checks it landed; a bare ``psmux send-keys ... Enter`` leaves the text unsent in the worker's input box.
 5. ``gh pr list --repo $($cfg.githubRepo) --state open --json number,title,headRefName,statusCheckRollup,mergeable`` for PR status, then **filter to the batch** (see BATCH SCOPING) — ignore PRs whose branch is not in an active worktree.
 6. When a worker reports ``WORKTREE_STATUS: COMPLETE`` and its PR is open with green CI: report it as ``READY FOR USER REVIEW``. Do NOT merge.
 7. When a worker reports ``WORKTREE_STATUS: BLOCKED``: report the reason and stop nudging that worker.
@@ -143,18 +143,21 @@ $target = "${Session}:${Window}"
 #    CLAUDE_CODE_CHILD_SESSION + force persistence, or transcript saving is silently
 #    OFF (same fix as the worker launch in psmux-dispatch.ps1).
 psmux send-keys -t $target '$env:CLAUDECODE=$null; $env:CLAUDE_CODE_ENTRYPOINT=$null; $env:CLAUDE_CODE_CHILD_SESSION=$null; $env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=''1'''
-psmux send-keys -t $target Enter
+psmux send-keys -t $target C-m
 
 # 7. Launch Claude (bare-path launch + standalone Enter, the proven pattern).
-psmux send-keys -t $target "$ClaudeCmd --dangerously-skip-permissions"
-psmux send-keys -t $target Enter
+# Same crew copy as this script, or the window may load an older installed one (Get-PluginDirArg).
+psmux send-keys -t $target "$ClaudeCmd --dangerously-skip-permissions $(Get-PluginDirArg)"
+psmux send-keys -t $target C-m
 
-# 8. Wait for Claude to boot before sending the brief instruction.
-Start-Sleep -Seconds 8
-
+# Wait for Claude to boot, answering its first-run screens (folder trust on a new
+# worktree, the bypass-permissions warning). A blind sleep left the brief typed onto the
+# trust screen, and the window sat there with "No, exit" selected.
+$boot = Wait-CliReady -Target $target -Cli (Get-WorkerCliPreset -Name 'claude')
+if (-not $boot.Ready) { Write-Warning "Claude in $target did not reach its prompt; sending the brief anyway. Check it: psmux capture-pane -t $target -p" }
 # 9. Send the short instruction (relative path — cwd is the worktree).
-psmux send-keys -t $target "Read .claude-bootstrap.md and follow it exactly."
-psmux send-keys -t $target Enter
+# Type the brief and verify it was submitted (Send-PaneMessage).
+if (-not (Send-PaneMessage -Target $target -Text "Read .claude-bootstrap.md and follow it exactly.")) { Write-Host "WARN: the brief in $target is still unsent - psmux send-keys -t $target C-m" }
 
 Write-Host ""
 Write-Host "[start-orchestrator] Launched in $target" -ForegroundColor Green

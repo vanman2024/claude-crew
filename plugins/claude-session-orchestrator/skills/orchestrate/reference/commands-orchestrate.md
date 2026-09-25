@@ -129,7 +129,7 @@ Everything else is out of scope for this poll.
 
 4. Send via:
    ```
-   psmux send-keys -t <sess>:<name> "<message>" Enter
+   pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "<message>" -Config "<repo>/.claude/session-plugin.json"
    ```
    (See [commands-monitor.md](commands-monitor.md) for the message templates.)
 
@@ -238,7 +238,7 @@ f021-referral        PASS   PASS   5/5           100%
 |--------|---------|
 | `psmux list-windows -t <sess>` | List live worker windows |
 | `psmux capture-pane -t <sess>:<name> -p` | Read a worker's pane (no focus steal) |
-| `psmux send-keys -t <sess>:<name> "<msg>" Enter` | Send a message / nudge |
+| `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "<msg>" -Config "<repo>/.claude/session-plugin.json"` | Send a message / nudge |
 | `status/check-worktree-health.ps1` | Health check (git, deps, env). `-Name <n>` or `-All` |
 | `status/check-headless-workers.ps1` | State + PR of each headless (Codex) worker. `-Json` |
 

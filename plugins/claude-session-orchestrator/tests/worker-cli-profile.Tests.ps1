@@ -33,7 +33,8 @@ Describe "Get-WorkerCliProfile" {
             $p.args | Should -Contain '--dangerously-skip-permissions'
             $p.clearEnv | Should -Contain 'CLAUDECODE'
             $p.clearEnv | Should -Contain 'CLAUDE_CODE_ENTRYPOINT'
-            $p.acceptSend | Should -Be '2'
+            # First-run screens are answered by navigation, not by typing "2".
+            @($p.acceptScreens | ForEach-Object { $_.choose }) | Should -Contain 'Yes,Itrustthisfolder'
             $p.readyMatchAny | Should -Contain 'bypasspermissionson'
         }
     }

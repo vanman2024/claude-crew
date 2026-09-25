@@ -76,7 +76,7 @@ Combine terminal output + git progress to determine agent state:
 ### Step 6: Send message if needed
 
 ```bash
-psmux send-keys -t <sess>:<name> "<message>" Enter
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "<message>" -Config "<repo>/.claude/session-plugin.json"
 ```
 
 The trailing `Enter` submits it (no ConPTY keybinding hack required — this is native psmux).
