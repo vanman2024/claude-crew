@@ -35,7 +35,7 @@ Read the board's **README** from `project_get`. It states that board's own rules
 which fields every item must carry. Follow them.
 
 Keep the ids you need: the `Status` field and its option ids, plus any other single-select
-fields you will set (`Work type`, `Phase`, `Priority`). Option ids differ between boards even
+fields you will set (`Module`, `Phase`, `Priority`). Option ids differ between boards even
 when the names match, so never reuse ids from another board.
 
 ## Putting an issue on the board, or finding its item
@@ -71,20 +71,40 @@ Only move an item forward along that list, and only to an option that exists on 
 If the board lacks an option (e.g. no `Staging`), use the next one that exists and say so.
 Never move an item backwards unless the user asks.
 
-## Other fields: fill only what is known
+## Classifying an item: you read it, you decide; nothing is copied
 
-A board's README may require more fields (Product, Module, Phase, Priority, Release slice,
-dates, Architecture layer, Dependency order). The plan's no-invention rule applies here too:
+Scripts build a board's structure. **You** classify the items, by reading each one. Never copy a
+label into a field: that is how a board ended up saying everything twice (see dev-lifecycle's
+`catalog/github-project.yaml`, CLASSIFICATION).
 
-| Field | Set it from | Otherwise |
-|---|---|---|
-| `Work type` | the issue's `Work type:` header (`feature` → Feature, `iteration` → Enhancement), or Bug when the issue is a bug | leave it |
-| `Dependency order` | the plan's wave number, if the board has this field | leave it |
-| `Phase` | `Develop` for build work dispatched to workers | leave it |
-| Product, Module, Priority, Release slice, dates, Architecture layer | the spec, the issue, or the user, stated explicitly | **leave empty**, and list what's missing in the plan so the user can fill it |
+| Field | What you set |
+|---|---|
+| **Module** | One value from the board's fixed list. **Feature work**: the product module it serves (the product's module registry). **Plumbing**: the `Platform — …` area of the architecture plane it builds (Surfaces & Routing, Trust & Contracts, Work & Correctness, Integrations, Operations, AI). Which list the value comes from *is* feature vs plumbing. Nothing fits → leave it empty and say so; never add an option |
+| **Work type** | **Don't.** The kind of change lives on the label only (`bug`, `enhancement`, `refactor`, `chore`, `discovery`). If a board still has a Work type field, leave it alone; it's being retired |
+| `Phase` | `Develop` for build work dispatched to workers, if the board has Phase |
+| `Dependency order` | the plan's wave number, if the board has this field |
+| Priority, dates, Release slice, Product | only when the spec, the issue or the user states it. Otherwise **leave empty** and list it as "to fill" |
 
 Never guess a priority, a date or a module to satisfy a board rule. An empty field the user can
 see is better than a plausible wrong one.
+
+## Trackers: how a large piece is organized and seen
+
+All work lives on the one board. A **large** piece (a spec that splits into several issues, an
+audit, a release push) gets a tracker. A small one doesn't: a tab for every epic is noise.
+
+1. **The tracker issue:** `gh issue create --title "[Tracker] <what>" --body-file <file>`. Its body
+   is the checklist and the source of truth for the piece.
+2. **Real sub-issues**, not a list of links, through `gh`:
+   ```
+   id=$(gh api repos/<owner>/<repo>/issues/<child#> --jq .id)
+   gh api -X POST repos/<owner>/<repo>/issues/<tracker#>/sub_issues -F sub_issue_id=$id
+   ```
+3. **Its own tab on the board**, through the Projects MCP (`gh` has no view command):
+   `project_create_view` (name: the tracker's subject, layout `BOARD_LAYOUT`), then
+   `project_update_view` with `filter_text: "parent-issue:<owner>/<repo>#<tracker#>"`.
+
+The tracker itself goes on the board too, in the same Module as its pieces.
 
 ## Reading the board for `status`
 

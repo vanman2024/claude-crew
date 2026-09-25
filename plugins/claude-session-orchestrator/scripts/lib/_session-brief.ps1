@@ -1,4 +1,4 @@
-﻿# _session-brief.ps1
+# _session-brief.ps1
 #
 # Brief generators. The worker brief is written to <worktree>/.claude-bootstrap.md
 # and is the ONLY thing the worker is told to read on launch. It must be
@@ -435,7 +435,7 @@ function Format-DocsSection {
 
 # Read the dispatch hints a crew-planned issue carries in its header lines:
 #   Spec: specs/intake.md          -> the worker's source of truth (-Spec)
-#   Work type: feature|iteration   -> -Mode
+#   Mode: feature|iteration        -> -Mode   (older issues say "Work type:"; still read)
 # The conductor's `plan` writes them. Without them an issue brief defaults to an
 # ITERATION with no spec, which is wrong for a new piece of a spec: the worker would
 # be told to change existing code only and would never read the spec. Accepts the
@@ -448,8 +448,8 @@ function Get-IssueBriefHints {
         if (-not $hints.Spec -and $line -match '^\s*\*{0,2}Spec:\*{0,2}\s*`?([^\s`]+\.(md|mdx|txt|ya?ml|json))`?') {
             $hints.Spec = $Matches[1]
         }
-        if (-not $hints.Mode -and $line -match '^\s*\*{0,2}Work type:\*{0,2}\s*(feature|iteration)\b') {
-            $hints.Mode = $Matches[1].ToLower()
+        if (-not $hints.Mode -and $line -match '^\s*\*{0,2}(Mode|Work type):\*{0,2}\s*(feature|iteration)\b') {
+            $hints.Mode = $Matches[2].ToLower()
         }
     }
     return $hints

@@ -603,3 +603,39 @@ Describe "GitHub: gh for issues/PRs, the GitHub Projects MCP for the board" {
         (Get-Content (Join-Path $PSScriptRoot "..\scripts\status\resolve-config.ps1") -Raw) | Should -Match 'githubProject'
     }
 }
+
+Describe "Board taxonomy: AI classifies, Module is the one field, trackers for big pieces" {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1")
+        . (Join-Path $PSScriptRoot "..\scripts\lib\_session-brief.ps1")
+        $script:Board = Get-Content (Join-Path $PSScriptRoot "..\skills\session\reference\commands-board.md") -Raw
+        $script:Plan  = Get-Content (Join-Path $PSScriptRoot "..\skills\session\reference\commands-plan.md") -Raw
+    }
+
+    It "the conductor never sets Work type; the kind of change is the label" {
+        $script:Board | Should -Match '\*\*Work type\*\* \| \*\*Don''t\.\*\*'
+        $script:Plan  | Should -Match 'Never set Work type'
+    }
+
+    It "Module separates feature work (product module) from plumbing (Platform area)" {
+        $script:Board | Should -Match 'Feature work'
+        $script:Board | Should -Match '`Platform — …` area'
+    }
+
+    It "never copies a label into a field" {
+        $script:Board | Should -Match 'Never copy a\s+label into a field'
+    }
+
+    It "a tracker is a [Tracker] parent with real sub-issues (gh) and a filtered tab (MCP)" {
+        $script:Board | Should -Match '\[Tracker\]'
+        $script:Board | Should -Match 'issues/<tracker#>/sub_issues'
+        $script:Board | Should -Match 'project_create_view'
+        $script:Board | Should -Match 'filter_text: "parent-issue:<owner>/<repo>#<tracker#>"'
+        $script:Plan  | Should -Match 'create a \*\*tracker\*\* first'
+    }
+
+    It "the issue header is 'Mode:', and old 'Work type:' issues still dispatch correctly" {
+        (Get-IssueBriefHints -Body "Spec: specs/a.md`nMode: feature").Mode | Should -Be 'feature'
+        (Get-IssueBriefHints -Body "Spec: specs/a.md`nWork type: iteration").Mode | Should -Be 'iteration'
+    }
+}

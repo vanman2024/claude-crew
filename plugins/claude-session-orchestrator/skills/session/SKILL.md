@@ -175,7 +175,7 @@ write issues that say more than the spec does. Full protocol:
    an **open question for the user**, not a value you pick. A piece blocked on one is
    `needs-decision` and waits.
 4. Show the plan table + open questions. **Create nothing until the user says go.**
-5. Create issues with `gh issue create --body-file`, headed by `Spec:` / `Work type:` lines. The
+5. Create issues with `gh issue create --body-file`, headed by `Spec:` / `Mode:` lines. The
    dispatcher reads them, so the worker is briefed to build that spec as a feature, not to tweak
    existing code. **Put each one on the project board** (Ready for wave 1, Backlog for later
    waves and `needs-decision`), filling only fields the spec or user states.

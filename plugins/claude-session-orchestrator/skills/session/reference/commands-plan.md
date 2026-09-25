@@ -92,7 +92,7 @@ them exactly like this:
 ```markdown
 Spec: specs/intake.md
 Spec section: §4 Form
-Work type: feature
+Mode: feature
 Lane: frontend
 Wave: 2
 Depends on: #<n of piece 2>
@@ -113,15 +113,18 @@ Anything not in the section quoted above.
 Part of #<epic>
 ```
 
-- `Work type: feature` for new pieces; `iteration` for a change to something that exists.
+- `Mode: feature` for new pieces; `iteration` for a change to something that exists.
   The dispatcher briefs a `feature` worker to read the whole spec and build to it.
-- Five pieces or more: create a parent epic first, listing the waves, and link each issue to it
-  (`Part of #<epic>`, and `gh issue edit <epic>` to add the task list once numbers exist).
+- Five pieces or more: create a **tracker** first (`[Tracker] <spec title>`, listing the waves),
+  make each piece a real **sub-issue** of it, and give it its own board tab filtered to it
+  (see [commands-board.md](commands-board.md), "Trackers"). Smaller plans skip the tracker.
 - **Put every issue on the project board** as you create it (GitHub Projects MCP, never
   `gh project`; see [commands-board.md](commands-board.md)): Status **Ready** for wave 1 with no
-  blocking question, **Backlog** for later waves and `needs-decision`. Fill `Work type` from the
-  header and `Dependency order` from the wave if the board has it. Fields the spec doesn't state
-  (priority, dates, module, release slice) stay **empty**. List them in your summary as "to fill".
+  blocking question, **Backlog** for later waves and `needs-decision`. Set **Module** by reading
+  the piece (a product module for feature work, a `Platform — …` area for plumbing) and
+  `Dependency order` from the wave if the board has it. Never set Work type: the kind of change
+  is the label. Fields the spec doesn't state (priority, dates, release slice) stay **empty**.
+  List them in your summary as "to fill".
 - Dependencies are written with real numbers, so create in wave order and fill `Depends on`
   as you go. After creating, `gh issue view <n>` each one and check the body rendered, with
   real numbers and no leftover placeholders.

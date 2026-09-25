@@ -62,6 +62,22 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   Protocol: `skills/session/reference/commands-board.md`. Dogfooded read-only against a real
   board.
 
+### Changed: how the conductor classifies board items
+- **The conductor classifies by reading; it never copies a label into a field.** It
+  never sets **Work type**: the kind of change lives on the label only. The field is
+  being retired (dev-lifecycle #33).
+- **Module is the one classification field.** Feature work takes the product module it
+  serves; plumbing takes a `Platform — …` area, one per architecture-kernel plane (Surfaces
+  & Routing, Trust & Contracts, Work & Correctness, Integrations, Operations, AI). If
+  nothing fits, it stays empty and gets flagged; no new option is ever added.
+- **Trackers for big pieces.** A plan of five or more pieces gets a `[Tracker]` parent
+  issue, each piece becomes a real sub-issue of it (through `gh`, via the REST
+  `sub_issues` endpoint), and the tracker gets its own board tab filtered to
+  `parent-issue:<owner>/<repo>#<n>` (through the Projects MCP). This is the RedAI #964
+  pattern.
+- The issue header that picks the worker brief is now `Mode: feature|iteration`. Older
+  issues that say `Work type:` are still read.
+
 ### Fixed (found by dogfooding a real launch in a sandbox psmux session)
 - **Every window's brief sat unsent.** Launchers typed the brief and pressed Enter once. The
   first submit after typing is sometimes eaten (Enter and C-m alike), and right after typing
