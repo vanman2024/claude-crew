@@ -1,0 +1,16 @@
+# Release notes, grouped. GitHub generates them from merged PRs for free;
+# this is what makes the result readable instead of one flat list.
+changelog:
+  exclude:
+    labels: [chore, dependencies]
+  categories:
+    - title: Breaking
+      labels: [breaking]
+    - title: Features
+      labels: [enhancement, feature]
+    - title: Fixes
+      labels: [bug, regression]
+    - title: Security
+      labels: [security, privacy]
+    - title: Everything else
+      labels: ["*"]

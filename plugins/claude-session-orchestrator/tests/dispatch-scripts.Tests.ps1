@@ -132,6 +132,37 @@ Describe "Dispatch robustness: -NoProfile + git stderr (the 'session won't start
     }
 }
 
+Describe "Dispatch robustness: Windows PowerShell 5.1 (npm EBADENGINE killed dispatch mid-install)" {
+    It "the shared lib refuses to load under Windows PowerShell 5.1, with a pwsh re-run hint" -Skip:(-not (Get-Command powershell.exe -ErrorAction SilentlyContinue)) {
+        $out = powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "try { . '$script:ConfigLib'; 'LOADED' } catch { `$_.Exception.Message }"
+        ($out -join "`n") | Should -Not -Match 'LOADED'
+        ($out -join "`n") | Should -Match 'requires PowerShell 7 \(pwsh\)'
+    }
+
+    It "the per-worktree install redirects inside cmd, not with a PowerShell-side *> / 2>" {
+        $lib = Get-Content $script:ConfigLib -Raw
+        $lib | Should -Not -Match 'cmd /c \$install\s*[*2]>'
+        $lib | Should -Match 'cmd /c "\$install > `"\$installLog`" 2>&1"'
+    }
+
+    It "no skill/reference doc or script tells the caller to launch via powershell.exe" {
+        $pluginRoot = Split-Path $script:ScriptsDir -Parent
+        $offenders = Get-ChildItem $pluginRoot -Recurse -Include *.md, *.ps1 |
+            Where-Object { $_.Name -ne 'CHANGELOG.md' -and $_.FullName -notmatch '\\tests\\' } |
+            Select-String -Pattern 'powershell\.exe\s+-' |
+            ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Orchestrator + reviewer launch with transcript saving on" {
+    It "<_> clears CLAUDE_CODE_CHILD_SESSION and forces session persistence" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1') {
+        $body = Get-Content (Join-Path $script:ScriptsDir "dispatch\$_") -Raw
+        $body | Should -Match '\$env:CLAUDE_CODE_CHILD_SESSION=\$null'
+        $body | Should -Match "\`$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=''1''"
+    }
+}
+
 Describe "psmux-dispatch.ps1 -Continue (resume mode)" {
     BeforeAll { $script:PsmuxBody = Get-Content $script:PsmuxScript -Raw }
 

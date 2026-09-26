@@ -202,8 +202,10 @@ psmux new-window -t $Session -n $Window -c $ReviewerHome
 
 $target = "${Session}:${Window}"
 
-# 8. Clear inherited CLAUDECODE so this Claude can spawn sub-agents (the /code-review skill).
-psmux send-keys -t $target '$env:CLAUDECODE=$null; $env:CLAUDE_CODE_ENTRYPOINT=$null'
+# 8. Clear inherited CLAUDECODE so this Claude can spawn sub-agents (the /code-review skill),
+#    and CLAUDE_CODE_CHILD_SESSION + force persistence, or transcript saving is silently
+#    OFF (same fix as the worker launch in psmux-dispatch.ps1).
+psmux send-keys -t $target '$env:CLAUDECODE=$null; $env:CLAUDE_CODE_ENTRYPOINT=$null; $env:CLAUDE_CODE_CHILD_SESSION=$null; $env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=''1'''
 psmux send-keys -t $target Enter
 
 # 9. Launch Claude (bare-path launch + standalone Enter, the proven pattern).

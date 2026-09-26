@@ -1,0 +1,105 @@
+{
+  "capabilities": {
+    "S01": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "complete",
+      "where": [
+        "plugins/claude-session-orchestrator/skills/session/SKILL.md",
+        "plugins/claude-session-orchestrator/skills/session/reference/"
+      ],
+      "why": "The surface is `cli` and the shell is coherent: three skills (session, session-init, build) with a documented 13-subcommand argument-hint, explicitly scoped allowed-tools, and eight reference documents under skills/session/reference/ covering core, monitor, orchestrate, pull, review, server and cleanup command families. This is the frame a user actually works inside and it is complete for the profile."
+    },
+    "S06": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "complete",
+      "where": [
+        "plugins/claude-session-orchestrator/scripts/lib/_session-config.ps1",
+        "plugins/claude-session-orchestrator/examples/"
+      ],
+      "why": "The canonical entity is the per-project .claude/session-plugin.json: projectName, repoPath, worktreesPath, psmuxSession, githubRepo, defaultBranch, workerCli/workerCmdPath, worktreeDeps, devServer and layout{type,envFiles,nodeModules,testCmd}. One shared loader owns it with an explicit three-step search order and a hard, message-bearing failure when it is absent; three worked examples cover the real layout variants (root, nextjs-fastapi, monorepo-split); config-resolution.Tests.ps1 covers the invariants. The no-hardcoded-project rule is stated in the library header and actually holds."
+    },
+    "S08": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "partial",
+      "where": [
+        "plugins/claude-session-orchestrator/scripts/lib/_session-config.ps1",
+        "plugins/claude-session-orchestrator/scripts/lib/_session-brief.ps1"
+      ],
+      "why": "A real seam exists: two dot-sourced libraries (_session-config.ps1, _session-brief.ps1) are loaded first by every entry script, so config resolution and brief generation are not duplicated per script. What is missing is a contract on that seam - there is no JSON schema for session-plugin.json and no schemaVersion field, so a config written for an older crew fails at whatever line first dereferences a missing key rather than at one validation boundary with a usable message. Open issue #9 pushes substantially more structure through this seam (templates, detected stacks, generated lanes), which makes the absent schema more load-bearing rather than less."
+    },
+    "S09": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "not_applicable",
+      "where": [
+        "plugins/claude-session-orchestrator/scripts/lib/_session-config.ps1"
+      ],
+      "why": "A deliberate product decision, recorded so a later reader does not mistake the absence for a gap. Crew owns no datastore. Its durable state is git worktrees, the per-project .claude/session-plugin.json file, and psmux window state - each owned by a tool crew drives rather than by crew itself. Adding persistence would mean owning a copy of state git already holds authoritatively. The location below is not a database; it is the config loader that stands in for one, and it is cited so this verdict can be re-checked rather than merely asserted."
+    },
+    "S38": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "partial",
+      "where": [
+        "plugins/claude-session-orchestrator/scripts/util/kill-port.ps1",
+        "plugins/claude-session-orchestrator/scripts/teardown/nuke-worktrees.ps1",
+        "plugins/claude-session-orchestrator/scripts/util/force-remove-dir.ps1"
+      ],
+      "why": "Credential scanning only arrived with this initialization - the .git/hooks/pre-commit hook did not exist before and was written by devctl scaffold in this run. The more material exposure is unreviewed: these scripts kill processes by port and by name and force-remove directories (kill-port.ps1, kill-worktree-agents.ps1, nuke-worktrees.ps1, force-remove-dir.ps1), all running against paths supplied by project config. This failure class has already fired once in this repo's own history - PR #4, 'never name-kill node in the build protocol (it kills Claude Code itself)'. The missing work is a blast-radius review of the destructive utilities, not more secret scanning."
+    },
+    "S40": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "partial",
+      "where": [
+        "plugins/claude-session-orchestrator/scripts/dispatch/restore-session.ps1",
+        "plugins/claude-session-orchestrator/scripts/status/check-worktree-health.ps1"
+      ],
+      "why": "Genuinely strong for a project this size: restore-session.ps1 plus psmux-dispatch -Continue recover a crashed session with its prior conversation, check-worktree-health.ps1 and check-headless-workers.ps1 detect dead or hung workers, and GIT_REDIRECT_STDERR is assigned once centrally in the shared lib to kill an entire class of dispatch abort. The gap is that recovery is entirely operator-initiated - every one of these is a command a person runs after noticing something is wrong. Nothing detects a failed worker and acts. Worker startup failure is a known standing pain point on this project."
+    },
+    "S41": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "partial",
+      "where": [
+        "plugins/claude-session-orchestrator/scripts/status/poll-worktrees.sh",
+        "plugins/claude-session-orchestrator/scripts/status/poll-format.js"
+      ],
+      "why": "poll-worktrees.sh with poll-format.js and orchestrator-hook.sh give a live view of what every worker is doing, which is the highest-value observability for this product and it works. The limit is that it is strictly point-in-time polling: no run is recorded, so once a worker dies there is no history of what it was doing, and diagnosing a failed overnight crew depends on psmux scrollback still existing. There is no artifact you can read the morning after."
+    },
+    "S42": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "complete",
+      "where": [
+        "plugins/claude-session-orchestrator/.claude-plugin/plugin.json",
+        "README.md"
+      ],
+      "why": "Windows + psmux + git worktrees is a stated product decision rather than an unexamined default - the README, the plugin description and the marketplace keywords all declare Windows explicitly. Runtime prerequisites are config-declared instead of assumed: workerCmdPath names the worker CLI binary, psmuxSession names the multiplexer session, worktreesPath names where trees are created. For a developer tool that drives local processes, this is the whole of the runtime platform and it is described."
+    },
+    "S43": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "partial",
+      "where": [
+        ".github/workflows/",
+        "plugins/claude-session-orchestrator/tests/"
+      ],
+      "why": "Was the highest-value gap in the repository, and is now half closed. Before this initialization there was no .github/workflows directory at all, so all 126 Pester tests passed while nothing ran them and eight merged PRs landed with no automated verification. Initialization added .github/workflows/tests.yml, which runs the suite on every push to main and every pull request and fails the build on a failing test. What remains is that the run is not yet binding: main gates on no required status check, because the checks initialization first applied could never pass and were removed. Making this workflow the required check is the rest of the work, and it can only be done after the workflow has run once on main so GitHub knows the check name. Tracked on issue #15."
+    },
+    "S44": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "partial",
+      "where": [
+        "plugins/claude-session-orchestrator/tests/"
+      ],
+      "why": "Content is better than typical for a plugin repo and notably well-targeted: 126 tests across five files covering brief generation, config resolution, dispatch script invocation, slug derivation and worker-CLI profiles - which is to say, regression tests written after real failures rather than coverage theatre. Two gaps: no coverage measurement of any kind, and the suite has no automated trigger (see S43). Strong test content, absent test enforcement."
+    },
+    "S45": {
+      "judged_at": "c852dc42525141e15832cef7d6e9464abd1c6ff3",
+      "status": "partial",
+      "where": [
+        ".claude-plugin/marketplace.json",
+        "plugins/claude-session-orchestrator/.claude-plugin/plugin.json",
+        "plugins/claude-session-orchestrator/CHANGELOG.md"
+      ],
+      "why": "Three sources of truth for one version number and they disagree. CHANGELOG.md documents releases up to 0.4.2 dated 2026-06-23 in disciplined Keep-a-Changelog form across eight or more entries; .claude-plugin/marketplace.json declares version 0.2.2; and the plugin's own plugin.json declares no version field at all. marketplace.json is the one users actually resolve through `/plugin install crew@claude-crew`, so an installer is offered 0.2.2 of a codebase whose changelog calls itself 0.4.2 - two minor versions of documented work that installs cannot see. The changelog discipline is real; the release step that carries a bump into the two manifests does not exist."
+    }
+  },
+  "journeys": {},
+  "version": 1
+}

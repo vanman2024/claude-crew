@@ -13,3 +13,13 @@ coverage*.xml
 
 # graphify generated knowledge-graph artifacts (regenerated on demand)
 graphify-out/
+.gstack/
+
+# Rebuildable analysis output. Both are regenerated on demand and must never be
+# merged: a committed graph database produces conflicts nobody can resolve, on a
+# file nobody reads. `.code-review-graph/` already self-ignores via its own
+# nested .gitignore; it is named here too so the rule is visible in one place.
+# NOT listed, deliberately: `.project/` is tracked, because a judgment nobody
+# can see in a diff is one nobody notices going wrong.
+.generated/
+.code-review-graph/

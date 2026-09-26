@@ -13,6 +13,16 @@
 
 Set-StrictMode -Version Latest
 
+# Refuse to run under Windows PowerShell 5.1. There, ANY PowerShell-side redirect of a
+# native command's stderr (`*>`, `2>&1`, even `2>$null`) wraps each stderr line in an
+# ErrorRecord, and every script here runs with ErrorActionPreference=Stop - so a harmless
+# warning (npm EBADENGINE, psmux "no server running") becomes a terminating error. The
+# worst case was dispatch dying mid `npm install`, leaving half-installed worktrees and
+# no psmux window. pwsh 7 does not do this. Fail up front, before anything is touched.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    throw "crew requires PowerShell 7 (pwsh), but this is Windows PowerShell $($PSVersionTable.PSVersion). Re-run with: pwsh -NoProfile -ExecutionPolicy Bypass -File <script> ...  (install: winget install Microsoft.PowerShell)"
+}
+
 # Git for Windows writes progress ("Fetching...", "Cloning...") to STDERR. Under a
 # strict/Stop error preference (and PS 7's native-error handling) that stderr can be
 # treated as a terminating error and abort dispatch — the recurring "session won't
@@ -194,6 +204,112 @@ function Get-PsmuxTarget {
     return "$($Config.psmuxSession):$Name"
 }
 
+# --- Free-port discovery (throwaway worktree dev servers) ---------------------
+# Worker worktrees each need their OWN frontend port for browser/Playwright checks
+# WITHOUT colliding with the main checkout's port (e.g. 3000), the shared backend
+# (8000), or another worktree's already-running server. The chosen port is
+# RUNTIME-ONLY: it is passed as a `next dev -p <port>` CLI flag and NEVER written to
+# any tracked file, so it cannot leak into a PR and corrupt the main checkout's
+# committed ports.
+
+# All TCP ports currently in the LISTENING state, as a hashtable<int,bool>. Uses the
+# same netstat detection already in dev-server.ps1 (consistent, no new dependency).
+function Get-ListeningPorts {
+    $used = @{}
+    foreach ($line in (netstat -ano | Select-String "LISTENING")) {
+        $cols  = ($line.ToString().Trim() -split '\s+')
+        $local = $cols[1]   # e.g. 0.0.0.0:3000  or  [::]:3000
+        if ($local -match ':(\d+)$') { $used[[int]$Matches[1]] = $true }
+    }
+    return $used
+}
+
+# First free port at or above $BasePort that is NOT listening and NOT in $Reserve.
+# Callers pass BasePort = mainPort + 1 so the main checkout's canonical port stays
+# untouched even when its server happens to be down.
+function Get-FreePort {
+    param(
+        [int]$BasePort = 3001,
+        [int]$MaxTries = 100,
+        [int[]]$Reserve = @()
+    )
+    $used = Get-ListeningPorts
+    for ($p = $BasePort; $p -lt ($BasePort + $MaxTries); $p++) {
+        if ($used.ContainsKey($p)) { continue }
+        if ($Reserve -contains $p) { continue }
+        return $p
+    }
+    throw "No free port found in range $BasePort..$($BasePort + $MaxTries - 1)"
+}
+
+# True when $Object has a non-null property $Name (Set-StrictMode-safe optional read).
+function Test-CfgProp {
+    param($Object, [string]$Name)
+    return ($null -ne $Object -and ($Object.PSObject.Properties.Name -contains $Name) -and $null -ne $Object.$Name)
+}
+
+# --- Throwaway worker backend (full-stack worktree verification) --------------
+# A task that CHANGES the backend can't verify against the shared main :8000 (that's
+# the MAIN checkout's old code) and can't bind :8000 itself. This resolves how to run
+# THIS branch's backend on its own free port so a worktree can self-verify, then be
+# torn down. The frontend is pointed at it via a RUNTIME env override (apiUrlEnv);
+# nothing is written to disk.
+#
+# Config (all optional; sane defaults). Reuses the monorepo-split part that declares
+# `pythonVenv` for dir/venv when present:
+#   "backendServer": {
+#     "dir": "backend", "venv": ".venv", "basePort": 8000,
+#     "startCmd": "\"{python}\" -m uvicorn main:app --app-dir \"{dir}\" --host 127.0.0.1 --port {port}",
+#     "apiUrlEnv": "NEXT_PUBLIC_API_URL"
+#   }
+# Tokens in startCmd: {python} = MAIN checkout's venv python (reused so there is no
+# slow/flaky per-worktree pip install), {dir} = the worktree's backend dir (also makes
+# the worktree path show up in the process command line so teardown can kill it), {port}.
+# The default deliberately runs WITHOUT --reload: the reloader spawns a child that
+# re-imports the app (a frequent Windows crash) and respawns pile up - the cause of
+# "the backend won't start" and runaway background servers.
+function Get-WorkerBackendConfig {
+    param([Parameter(Mandatory)]$Config)
+
+    $bs = if (Test-CfgProp $Config 'backendServer') { $Config.backendServer } else { $null }
+
+    $bePart = $null
+    if (($Config.layout.type -eq 'monorepo-split') -and (Test-CfgProp $Config.layout 'parts')) {
+        foreach ($part in $Config.layout.parts) {
+            if (Test-CfgProp $part 'pythonVenv') { $bePart = $part; break }
+        }
+    }
+
+    $dir = $null
+    if     (Test-CfgProp $bs 'dir') { $dir = [string]$bs.dir }
+    elseif ($bePart)                { $dir = [string]$bePart.path }
+
+    $venv = '.venv'
+    if     (Test-CfgProp $bs 'venv')                          { $venv = [string]$bs.venv }
+    elseif ($bePart -and (Test-CfgProp $bePart 'pythonVenv')) { $venv = [string]$bePart.pythonVenv }
+
+    $basePort = 8000
+    if (Test-CfgProp $bs 'basePort') { $basePort = [int]$bs.basePort }
+
+    $startCmd = '"{python}" -m uvicorn main:app --app-dir "{dir}" --host 127.0.0.1 --port {port} --log-level info'
+    if (Test-CfgProp $bs 'startCmd') { $startCmd = [string]$bs.startCmd }
+
+    # Frontend->backend env var(s) to override at runtime so the throwaway frontend
+    # talks to the throwaway backend. Default covers the two common Next.js names
+    # (setting one the app doesn't read is harmless). Config may be a string or array.
+    $apiUrlEnv = @('NEXT_PUBLIC_API_URL', 'NEXT_PUBLIC_BACKEND_URL')
+    if (Test-CfgProp $bs 'apiUrlEnv') { $apiUrlEnv = @($bs.apiUrlEnv) }
+
+    return [pscustomobject]@{
+        dir        = ($dir -replace '/', '\')
+        venv       = $venv
+        basePort   = $basePort
+        startCmd   = $startCmd
+        apiUrlEnv  = $apiUrlEnv
+        hasBackend = [bool]$dir
+    }
+}
+
 # Kebab-case slug from arbitrary text (issue titles etc).
 function ConvertTo-SessionSlug {
     param([Parameter(Mandatory)][string]$Text, [int]$MaxLength = 40)
@@ -308,7 +424,11 @@ function Initialize-WorkerWorktree {
                         # Redirect ALL install output to a log file. Otherwise the native
                         # stdout flows into this function's return pipeline and poisons
                         # $WtPath, silently breaking psmux window creation downstream.
-                        cmd /c $install *> (Join-Path $pkgDir '.pnpm-install.log')
+                        # The redirect is done by cmd, not PowerShell: a PS-side `*>` turns
+                        # npm's stderr warnings (EBADENGINE) into terminating errors under
+                        # Stop on some hosts. The exit code is the only failure signal.
+                        $installLog = Join-Path $pkgDir '.pnpm-install.log'
+                        cmd /c "$install > `"$installLog`" 2>&1"
                         if ($LASTEXITCODE -ne 0) { throw "worktree dep install failed in '$pkgDir' ($install) - see .pnpm-install.log" }
                     } finally { Pop-Location }
                 }

@@ -1,0 +1,121 @@
+# What this project is. Deliberately small.
+#
+# It replaces the projects, project_profiles and environments tables of
+# the Product Graph, and it must never grow into a universal project
+# model -- that is the same store with a different file extension.
+# Anything derivable from code belongs to CRG; anything about work in
+# flight belongs to GitHub.
+
+name: claude-crew
+profile: cli-library
+confirmed_by_user: true
+surfaces:
+  - cli
+
+default_branch: main
+
+# How work is tracked. `devctl github project recommend` proposes this
+# from the profile and what the repository already looks like; a person
+# confirms it. `none` is a legitimate answer and is never chosen for
+# you -- but with nothing to reconcile against, the gate that stops a
+# second implementation of something that exists cannot run.
+#
+#   github-projects   issues, a board, fields, views, milestones, dates
+#   issues-only       issues, PRs, labels, milestones -- no board
+#   none              an explicit opt-out
+project_management:
+  mode: github-projects
+  provider: github
+  owner: vanman2024
+  # No Project node id, no field ids, no issue state. Those are live,
+  # and a stored copy of a discoverable thing is a thing somebody has
+  # to keep current.
+
+decisions:
+  - decision: >-
+      `main` is protected against force-push and deletion, but gates on no
+      status check and no approving review.
+    why: >-
+      Initialization first required the `add` and `status` jobs from
+      project-automation.yml plus one approving review. Neither job can pass --
+      they need a PROJECT_TOKEN secret that does not exist -- and a single
+      maintainer cannot approve their own pull request, so every PR was blocked
+      by gates that prove nothing. A gate that is always overridden teaches
+      people to override gates.
+    open_risk: >-
+      There is no automated check on merge until S43 (issue #15) adds a workflow
+      running the 126 Pester tests. That workflow, not board automation, is what
+      should become the required check. PROJECT_URL is set; PROJECT_TOKEN is
+      still absent, so board automation will not run.
+  - decision: >-
+      Board state is updated by running `devctl github project seed`, not by the
+      project-automation workflow.
+    why: >-
+      The workflow needs a PROJECT_TOKEN secret, because GITHUB_TOKEN has no
+      `project` scope and cannot be granted one. A repo secret is readable by
+      every workflow run in the repository, so a long-lived project-scoped PAT
+      copied into repo settings is a standing exposure in exchange for a
+      convenience. The local `gh` credential already carries the scope, so
+      seeding from a machine costs nothing and stores no secret.
+    open_risk: >-
+      The board is only true as of the last seed. Run it after creating issues.
+      `.github/workflows/project-automation.yml` remains in the repository,
+      inert, so this can be switched on later by setting the secret.
+
+  - decision: >-
+      No documented single command that starts every runtime, and none is
+      applicable.
+    why: >-
+      Crew has no runtime of its own to start. It is a Claude Code plugin whose
+      entry points are skills, invoked inside a session, and whose scripts drive
+      psmux and git in the consuming project. `devctl scaffold --only delivery`
+      confirms this from the other direction: every delivery artifact it knows
+      about is marked "not a cli-library concern", so the remedy `health`
+      suggests copies nothing.
+    open_risk: >-
+      `devctl health` will keep reporting this as missing.
+
+  - decision: PRODUCT.md is the product record; there is no specs/product-brief.md.
+    why: >-
+      The PRODUCT.md template states that it was extracted from product-brief.md
+      and module-registry.md precisely so one canonical artifact replaces two
+      that drift. Writing a second document describing the same product would
+      recreate the problem PRODUCT.md exists to solve.
+    open_risk: >-
+      `devctl health` asks for specs/product-brief.md separately and will keep
+      reporting it missing.
+
+  - decision: No .env.example, deliberately.
+    why: >-
+      Crew consumes no user-supplied environment variable. The only four in the
+      codebase are TEMP (the OS), CLAUDECODE and CLAUDE_CODE_ENTRYPOINT (set by
+      Claude Code), and GIT_REDIRECT_STDERR (set by crew itself in the shared
+      config lib). Every project-specific value lives in that project's own
+      .claude/session-plugin.json instead. An empty .env.example would satisfy
+      the checklist and tell a reader nothing true.
+    open_risk: >-
+      `devctl init check` will keep reporting .env.example as missing, and the
+      remedy it names -- `devctl env check --fix-example` -- is not a real flag
+      on env-drift.py.
+
+# cli-library delivery is local -> CI -> prerelease -> stable release,
+# not a deployed stack. There is no server to health-check: "release"
+# means the marketplace manifest a user installs from.
+environments:
+  - name: development
+  - name: ci
+  - name: prerelease
+  - name: release
+# Each environment may declare the runtimes it deploys, so `devctl env
+# check --probe` can ask each one what commit it is running:
+#
+#   - name: staging
+#     source_branch: staging
+#     runtimes:
+#       - role: frontend
+#         provider: vercel
+#         health_url: https://staging.example.com/api/health
+#
+# Pick an environment strategy deliberately --
+# catalog/project-profiles.yaml describes four. A permanent second
+# stack is the most expensive way to get an integrated check.

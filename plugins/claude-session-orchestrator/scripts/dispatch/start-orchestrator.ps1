@@ -1,4 +1,4 @@
-﻿# start-orchestrator.ps1
+# start-orchestrator.ps1
 #
 # Spawns a dedicated Orchestrator Claude in its own psmux window, running from
 # its own git worktree at <worktreesPath>\orchestrator (detached HEAD at
@@ -112,7 +112,7 @@ CONTRACT (do not violate):
 6. When a worker reports ``WORKTREE_STATUS: COMPLETE`` and its PR is open with green CI: report it as ``READY FOR USER REVIEW``. Do NOT merge.
 7. When a worker reports ``WORKTREE_STATUS: BLOCKED``: report the reason and stop nudging that worker.
 8. When a PR is observed merged (by the user) and its worker window still exists: run the teardown script
-   ``powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$CloseWorkerScript" -Name <worker> -Config "$($cfg._configPath)"``
+   ``pwsh -NoProfile -ExecutionPolicy Bypass -File "$CloseWorkerScript" -Name <worker> -Config "$($cfg._configPath)"``
    which detaches the node_modules junction(s) FIRST, kills the window, then removes the worktree.
 9. **Self-terminate** the loop when: no live worker windows AND no open PRs from this batch remain. Print a summary, exit the loop, exit Claude.
 
@@ -143,8 +143,10 @@ psmux new-window -t $Session -n $Window -c $OrchestratorWorktree
 
 $target = "${Session}:${Window}"
 
-# 6. Clear inherited CLAUDECODE so this Claude can spawn sub-agents if needed.
-psmux send-keys -t $target '$env:CLAUDECODE=$null; $env:CLAUDE_CODE_ENTRYPOINT=$null'
+# 6. Clear inherited CLAUDECODE so this Claude can spawn sub-agents if needed, and
+#    CLAUDE_CODE_CHILD_SESSION + force persistence, or transcript saving is silently
+#    OFF (same fix as the worker launch in psmux-dispatch.ps1).
+psmux send-keys -t $target '$env:CLAUDECODE=$null; $env:CLAUDE_CODE_ENTRYPOINT=$null; $env:CLAUDE_CODE_CHILD_SESSION=$null; $env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=''1'''
 psmux send-keys -t $target Enter
 
 # 7. Launch Claude (bare-path launch + standalone Enter, the proven pattern).

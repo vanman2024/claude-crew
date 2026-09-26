@@ -51,21 +51,56 @@ Write-Host "[close-worker] Closing worker '$Name'"
 Write-Host "[close-worker]   worktree: $WtPath"
 Write-Host ""
 
-# 1. Detach EVERY node_modules junction FIRST (link only, main checkout untouched).
-foreach ($rel in (Get-NodeModuleMappings -Config $cfg)) {
-    $junction = Join-Path $WtPath $rel
-    if (Test-Path $junction) {
-        $item = Get-Item $junction -Force
-        $isReparse = ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
-        if ($isReparse) {
-            Write-Host "[close-worker] Detaching '$rel' junction (link only, main checkout untouched)"
-            cmd /c rmdir $junction
-        } else {
-            Write-Warning "[close-worker] $junction is a REAL directory, not a junction. Refusing to remove (would destroy real files). Investigate manually."
-            exit 1
+# 0. Force-kill any throwaway dev/backend server still running for THIS worktree, so no
+#    orphaned next/uvicorn process survives teardown (a pile-up of these fries the box).
+#    Matched by command line referencing the worktree path: the frontend (npx next from
+#    the worktree's node_modules) and the backend (uvicorn --app-dir "<worktree>\backend").
+#    Scoped to this worktree only - never a name-based sweep across node processes.
+try {
+    $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -like "*$WtPath*" })
+    if ($procs.Count -gt 0) {
+        foreach ($p in $procs) {
+            Write-Host "[close-worker] Killing worktree server PID $($p.ProcessId) ($($p.Name))"
+            foreach ($child in (Get-CimInstance Win32_Process -Filter "ParentProcessId=$($p.ProcessId)" -ErrorAction SilentlyContinue)) {
+                try { Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+            }
+            try { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
         }
     } else {
-        Write-Host "[close-worker] No '$rel' junction to detach (already gone or never created)"
+        Write-Host "[close-worker] No worktree servers running (nothing to kill)"
+    }
+} catch { Write-Warning "[close-worker] worktree process sweep skipped: $($_.Exception.Message)" }
+
+# 1. Deal with node_modules FIRST, per the project's worktreeDeps mode.
+#
+#   junction mode - the dir is a LINK into the main checkout. It MUST be detached with
+#     rmdir (link only) before `git worktree remove`, which would otherwise follow the
+#     link and delete the MAIN checkout's node_modules.
+#   install mode  - the dir is a REAL per-worktree install. There is no link to follow
+#     and nothing shared, so it goes with the worktree. A real dir here is EXPECTED.
+#
+# A real directory while in junction mode is still a hard stop: that is the shape that
+# means something is not what the config says it is, and guessing costs the main checkout.
+$depsMode = Get-WorktreeDepsMode -Config $cfg
+foreach ($rel in (Get-NodeModuleMappings -Config $cfg)) {
+    $nm = Join-Path $WtPath $rel
+    if (-not (Test-Path $nm)) {
+        Write-Host "[close-worker] No '$rel' to handle (already gone or never created)"
+        continue
+    }
+    $item = Get-Item $nm -Force
+    $isReparse = ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+
+    if ($isReparse) {
+        # Always detach a link, whatever the mode - it is never safe to recurse into one.
+        Write-Host "[close-worker] Detaching '$rel' junction (link only, main checkout untouched)"
+        cmd /c rmdir $nm
+    } elseif ($depsMode -eq 'install') {
+        Write-Host "[close-worker] '$rel' is a real per-worktree install (worktreeDeps=install) - removing with the worktree"
+    } else {
+        Write-Warning "[close-worker] $nm is a REAL directory but this project is worktreeDeps='$depsMode' (expected a junction). Refusing to remove - if this worktree really has its own install, set worktreeDeps='install' in the config. Investigate manually."
+        exit 1
     }
 }
 

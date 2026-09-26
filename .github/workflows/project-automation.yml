@@ -1,0 +1,159 @@
+# Keeps the Project board true without anybody moving a card.
+#
+# The board is only worth reading if it matches reality, and it only matches
+# reality if nothing depends on a person remembering to drag something. Every
+# transition below is triggered by an event that already happens: an issue is
+# opened, a PR is opened, a PR merges and closes its issue.
+#
+# WHY THIS IS ACTIONS AND NOT A PROJECT WORKFLOW
+#
+# GitHub Projects has built-in workflows in the UI that do some of this. They
+# cannot be created from the API: the GraphQL schema exposes
+# `deleteProjectV2Workflow` and no create or update counterpart, so a built-in
+# workflow can be removed programmatically but never configured. Anything that
+# has to be reproducible on a new repository has to live here instead.
+#
+# THE TOKEN, WHICH IS THE PART THAT CATCHES PEOPLE
+#
+# `GITHUB_TOKEN` cannot write to a Project. It has no `project` scope and no way
+# to be granted one, so every step below uses a PAT in `secrets.PROJECT_TOKEN`.
+# Without that secret the add step fails with a permissions error that reads
+# like the project URL is wrong.
+#
+#   gh secret set PROJECT_TOKEN --body "<a PAT with repo + project scope>"
+#
+# SET PROJECT_URL BEFORE THIS DOES ANYTHING
+#
+# `devctl github project apply` prints the number it created; the URL is
+# https://github.com/users/<owner>/projects/<number> for a user-owned board and
+# .../orgs/<org>/projects/<number> for an organisation.
+
+name: Project automation
+
+on:
+  issues:
+    types: [opened, reopened, closed, transferred]
+  pull_request:
+    types: [opened, reopened, ready_for_review, closed]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+env:
+  PROJECT_URL: ${{ vars.PROJECT_URL }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Everything that opens goes on the board. An issue nobody added is an issue
+  # nobody sees, and remembering to add it is exactly the manual step this
+  # exists to delete.
+  # ---------------------------------------------------------------------------
+  add:
+    if: github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'transferred'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/add-to-project@v2.0.0
+        with:
+          project-url: ${{ vars.PROJECT_URL }}
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Status, which `add-to-project` deliberately does not touch -- it adds items
+  # and stops. Field values are a separate mutation, so this resolves the item
+  # and writes to it directly.
+  #
+  # The mapping is deliberately small. A board with six states nobody updates is
+  # worse than one with three that are always right:
+  #
+  #   PR opened / ready for review   the issue it closes  ->  In review
+  #   issue closed                                        ->  Done
+  # ---------------------------------------------------------------------------
+  status:
+    if: github.event.action == 'closed' || github.event.action == 'ready_for_review' || github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Move the item to the right column
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_URL: ${{ vars.PROJECT_URL }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          MERGED: ${{ github.event.pull_request.merged }}
+          ISSUE: ${{ github.event.issue.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Which column, from the event alone.
+          if [ "$EVENT" = "issues" ] && [ "$ACTION" = "closed" ]; then
+            WANT="Done"; TARGETS="$ISSUE"
+          elif [ "$EVENT" = "pull_request" ] && [ "$ACTION" != "closed" ]; then
+            WANT="In review"
+            # A PR moves the issues it closes, not itself. `Closes #N` is the
+            # only phrasing GitHub honours for the link, so it is the only one
+            # parsed here -- matching more would move issues GitHub will not
+            # actually close.
+            TARGETS=$(printf '%s' "$PR_BODY" | grep -oiE '\b(closes|fixes|resolves) #[0-9]+' | grep -oE '[0-9]+' || true)
+          else
+            echo "Nothing to move for $EVENT/$ACTION."; exit 0
+          fi
+
+          [ -n "${TARGETS:-}" ] || { echo "No linked issue. Nothing to move."; exit 0; }
+
+          # The project, from the URL that configured this workflow.
+          OWNER=$(printf '%s' "$PROJECT_URL" | sed -E 's#.*/(users|orgs)/([^/]+)/projects/.*#\2#')
+          KIND=$(printf '%s' "$PROJECT_URL"  | sed -E 's#.*/(users|orgs)/[^/]+/projects/.*#\1#')
+          NUMBER=$(printf '%s' "$PROJECT_URL" | sed -E 's#.*/projects/([0-9]+).*#\1#')
+          HOLDER=$([ "$KIND" = "orgs" ] && echo organization || echo user)
+
+          BOARD=$(gh api graphql -f query="
+            query(\$owner:String!, \$number:Int!) {
+              $HOLDER(login:\$owner){ projectV2(number:\$number){
+                id
+                field(name:\"Status\"){
+                  ... on ProjectV2SingleSelectField { id options{ id name } }
+                }
+              } }
+            }" -F owner="$OWNER" -F number="$NUMBER")
+
+          PROJECT_ID=$(printf '%s' "$BOARD" | jq -r ".data.$HOLDER.projectV2.id")
+          FIELD_ID=$(printf '%s' "$BOARD" | jq -r ".data.$HOLDER.projectV2.field.id")
+          # Case-insensitively: GitHub's built-in Status ships `In Progress`
+          # where the catalog says `In progress`, and they are one option.
+          OPTION_ID=$(printf '%s' "$BOARD" | jq -r --arg want "$WANT" \
+            ".data.$HOLDER.projectV2.field.options[]
+             | select((.name | ascii_downcase) == (\$want | ascii_downcase))
+             | .id" | head -1)
+
+          if [ -z "${OPTION_ID:-}" ] || [ "$OPTION_ID" = "null" ]; then
+            echo "::error::The Status field has no '$WANT' option."
+            echo "Run: devctl github project apply — it adds the missing options."
+            exit 1
+          fi
+
+          for N in $TARGETS; do
+            ITEM=$(gh api graphql -f query='
+              query($owner:String!, $repo:String!, $number:Int!) {
+                repository(owner:$owner, name:$repo){ issue(number:$number){
+                  projectItems(first:20){ nodes{ id project{ id } } } } }
+              }' -F owner="${REPO%%/*}" -F repo="${REPO##*/}" -F number="$N" \
+              --jq ".data.repository.issue.projectItems.nodes[] | select(.project.id == \"$PROJECT_ID\") | .id")
+
+            if [ -z "$ITEM" ]; then
+              echo "Issue #$N is not on this board; skipping."
+              continue
+            fi
+
+            gh api graphql -f query='
+              mutation($p:ID!, $i:ID!, $f:ID!, $o:String!) {
+                updateProjectV2ItemFieldValue(input:{
+                  projectId:$p, itemId:$i, fieldId:$f,
+                  value:{ singleSelectOptionId:$o }
+                }){ projectV2Item { id } }
+              }' -F p="$PROJECT_ID" -F i="$ITEM" -F f="$FIELD_ID" -F o="$OPTION_ID" >/dev/null
+
+            echo "Issue #$N -> $WANT"
+          done
