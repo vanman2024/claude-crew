@@ -4,7 +4,7 @@
 # its own git worktree at <worktreesPath>\orchestrator (detached HEAD at
 # origin/<defaultBranch> — never modified, never committed to). The worktree
 # exists so the orchestrator Claude has:
-#   - the project's .claude/ tree available (so /session resolves)
+#   - the project's .claude/ tree available (so /crew:orchestrate resolves)
 #   - a stable file context that does NOT swap when you git checkout in main
 #
 # The orchestrator is autonomous (no human watching the pane), so it runs with
@@ -44,9 +44,6 @@ $MainRepo             = $cfg.repoPath
 $WtBase               = $cfg.worktreesPath
 $DefaultBranch        = $cfg.defaultBranch
 $OrchestratorWorktree = Join-Path $WtBase "orchestrator"
-# Resolve the teardown script (sibling folder) so the brief can reference it by absolute path.
-$CloseWorkerScript    = (Join-Path $PSScriptRoot "..\teardown\close-worker.ps1")
-if (Test-Path $CloseWorkerScript) { $CloseWorkerScript = (Resolve-Path $CloseWorkerScript).Path }
 
 if (-not (Test-Path $ClaudeCmd))                            { Write-Error "claude.cmd not found at $ClaudeCmd (config.workerCmdPath)"; exit 1 }
 if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) { Write-Error "psmux not on PATH"; exit 1 }
@@ -107,18 +104,17 @@ CONTRACT (do not violate):
 1. Every $IntervalMin minutes, poll the worker panes.
 2. ``psmux list-windows -t $Session`` to see live workers. Skip the infra windows: yourself (``$Window``) and ``reviewer``.
 3. For each worker: ``psmux capture-pane -t ${Session}:<worker> -p`` and analyze state.
-4. ``psmux send-keys -t ${Session}:<worker> "<nudge>" Enter`` to steer stuck workers.
+4. Steer stuck workers with ``pwsh -NoProfile -File "$(Join-Path (Get-PluginRoot) 'scripts\dispatch\send-to-worker.ps1')" -Name <worker> -Message "<nudge>" -Config "$($cfg._configPath)"``. It submits the message and checks it landed; a bare ``psmux send-keys ... Enter`` leaves the text unsent in the worker's input box.
 5. ``gh pr list --repo $($cfg.githubRepo) --state open --json number,title,headRefName,statusCheckRollup,mergeable`` for PR status, then **filter to the batch** (see BATCH SCOPING) — ignore PRs whose branch is not in an active worktree.
 6. When a worker reports ``WORKTREE_STATUS: COMPLETE`` and its PR is open with green CI: report it as ``READY FOR USER REVIEW``. Do NOT merge.
 7. When a worker reports ``WORKTREE_STATUS: BLOCKED``: report the reason and stop nudging that worker.
-8. When a PR is observed merged (by the user) and its worker window still exists: run the teardown script
-   ``pwsh -NoProfile -ExecutionPolicy Bypass -File "$CloseWorkerScript" -Name <worker> -Config "$($cfg._configPath)"``
-   which detaches the node_modules junction(s) FIRST, kills the window, then removes the worktree.
+8. When a PR is observed merged (by the user): report it as ``MERGED``. Do NOT tear the worker down. The user keeps workers alive to iterate or take more tasks; teardown is the conductor's job (the user's own session), and only when the user says a worker is done.
 9. **Self-terminate** the loop when: no live worker windows AND no open PRs from this batch remain. Print a summary, exit the loop, exit Claude.
 
 HARD RULES:
 
-- NEVER run ``gh pr merge``. The user authorizes all merges via their conversational Claude.
+- NEVER run ``gh pr merge``. The user authorizes all merges through the conductor (their own session).
+- NEVER tear down a worker: no close-worker, no kill-window, no worktree remove.
 - NEVER run ``git checkout`` against the main repo at $MainRepo.
 - NEVER run ``git pull origin $DefaultBranch`` in the main repo.
 - NEVER modify or commit in this orchestrator worktree.
@@ -127,11 +123,11 @@ HARD RULES:
 
 FIRST ACTION — run one immediate poll right now so you have a current picture of workers + PRs before the loop's first interval:
 
-``/session orchestrate poll``
+``/crew:orchestrate poll``
 
 THEN start the recurring loop:
 
-``/loop ${IntervalMin}m /session orchestrate poll``
+``/loop ${IntervalMin}m /crew:orchestrate poll``
 "@
 
 Set-Content -Path $briefPath -Value $brief -Encoding UTF8
@@ -147,18 +143,21 @@ $target = "${Session}:${Window}"
 #    CLAUDE_CODE_CHILD_SESSION + force persistence, or transcript saving is silently
 #    OFF (same fix as the worker launch in psmux-dispatch.ps1).
 psmux send-keys -t $target '$env:CLAUDECODE=$null; $env:CLAUDE_CODE_ENTRYPOINT=$null; $env:CLAUDE_CODE_CHILD_SESSION=$null; $env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=''1'''
-psmux send-keys -t $target Enter
+psmux send-keys -t $target C-m
 
 # 7. Launch Claude (bare-path launch + standalone Enter, the proven pattern).
-psmux send-keys -t $target "$ClaudeCmd --dangerously-skip-permissions"
-psmux send-keys -t $target Enter
+# Same crew copy as this script, or the window may load an older installed one (Get-PluginDirArg).
+psmux send-keys -t $target "$ClaudeCmd --dangerously-skip-permissions $(Get-PluginDirArg)"
+psmux send-keys -t $target C-m
 
-# 8. Wait for Claude to boot before sending the brief instruction.
-Start-Sleep -Seconds 8
-
+# Wait for Claude to boot, answering its first-run screens (folder trust on a new
+# worktree, the bypass-permissions warning). A blind sleep left the brief typed onto the
+# trust screen, and the window sat there with "No, exit" selected.
+$boot = Wait-CliReady -Target $target -Cli (Get-WorkerCliPreset -Name 'claude')
+if (-not $boot.Ready) { Write-Warning "Claude in $target did not reach its prompt; sending the brief anyway. Check it: psmux capture-pane -t $target -p" }
 # 9. Send the short instruction (relative path — cwd is the worktree).
-psmux send-keys -t $target "Read .claude-bootstrap.md and follow it exactly."
-psmux send-keys -t $target Enter
+# Type the brief and verify it was submitted (Send-PaneMessage).
+if (-not (Send-PaneMessage -Target $target -Text "Read .claude-bootstrap.md and follow it exactly.")) { Write-Host "WARN: the brief in $target is still unsent - psmux send-keys -t $target C-m" }
 
 Write-Host ""
 Write-Host "[start-orchestrator] Launched in $target" -ForegroundColor Green
@@ -188,7 +187,7 @@ if (-not $NoReviewer) {
         Write-Host "[start-orchestrator] WARN: start-reviewer.ps1 not found next to this script; skipping reviewer." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "[start-orchestrator] -NoReviewer set — reviewer NOT launched. Start it later with /session review-start." -ForegroundColor DarkGray
+    Write-Host "[start-orchestrator] -NoReviewer set — reviewer NOT launched. Start it later with /crew:session review-start." -ForegroundColor DarkGray
 }
 
 

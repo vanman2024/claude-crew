@@ -7,29 +7,45 @@
   "defaultBranch": "master",
   "workerCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
   "worktreeDeps": "install",
-  "devServer": { "port": 3000, "dir": "frontend" },
-  "review": { "intervalMin": 5 },
+  "devServer": {
+    "port": 3000,
+    "dir": "frontend"
+  },
+  "review": {
+    "intervalMin": 5
+  },
   "layout": {
     "type": "monorepo-split",
     "parts": [
       {
         "name": "frontend",
         "path": "frontend",
-        "envFiles": [".env.local", ".env.test"],
+        "envFiles": [
+          ".env.local",
+          ".env.test"
+        ],
         "nodeModules": "frontend/node_modules",
         "testCmd": "cd frontend && npx tsc --noEmit && pnpm test"
       },
       {
         "name": "backend",
         "path": "backend",
-        "envFiles": [".env"],
+        "envFiles": [
+          ".env"
+        ],
         "pythonVenv": ".venv",
         "testCmd": "& '<repo>\\backend\\.venv\\Scripts\\python.exe' -m pytest"
       }
     ]
   },
   "dataFlow": {
-    "entities": ["User", "Order", "Payment", "Receipt", "Notification"],
+    "entities": [
+      "User",
+      "Order",
+      "Payment",
+      "Receipt",
+      "Notification"
+    ],
     "flows": [
       "User creates Order -> Order created (status: pending)",
       "Order triggers Payment -> Payment charges provider",
@@ -40,7 +56,12 @@
   },
   "teams": {
     "frontend": {
-      "ownsPaths": ["frontend/components/**", "frontend/app/**", "frontend/lib/**", "frontend/hooks/**"],
+      "ownsPaths": [
+        "frontend/components/**",
+        "frontend/app/**",
+        "frontend/lib/**",
+        "frontend/hooks/**"
+      ],
       "agents": [
         "nextjs-frontend:component-builder-agent",
         "nextjs-frontend:page-generator-agent",
@@ -55,15 +76,26 @@
       ]
     },
     "backend": {
-      "ownsPaths": ["backend/api/routes/**", "backend/services/**", "backend/models/**"],
+      "ownsPaths": [
+        "backend/api/routes/**",
+        "backend/services/**",
+        "backend/models/**"
+      ],
       "agents": [
         "fastapi-backend:endpoint-generator-agent",
         "fastapi-backend:database-architect-agent"
       ]
     },
     "testing": {
-      "agents": ["frontend-test-generator", "code-validator"]
+      "agents": [
+        "frontend-test-generator",
+        "code-validator"
+      ]
     }
+  },
+  "githubProject": {
+    "ownerKind": "USER",
+    "owner": "your-github-login",
+    "number": 1
   }
 }
-

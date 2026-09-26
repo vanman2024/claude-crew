@@ -247,31 +247,71 @@ The same scripts drive both layouts; behavior comes entirely from this config.
 
 ## Usage
 
-All commands are subcommands of `/session` (it reads your config first):
+### One skill per role
+
+Each Claude in a crew build loads only the skill for its own job, so none of them
+mistakes itself for another:
+
+| Skill | Who uses it | Job |
+|---|---|---|
+| `/crew:session` | **You**: your own session, the conductor | Dispatch, relay your feedback into workers, run their branches locally, merge, pull, tear down |
+| `/crew:orchestrate` | The `orchestrator` window (its brief calls it) | Poll workers, nudge, flag green PRs `READY FOR USER REVIEW` |
+| `/crew:review` | The `reviewer` window (its brief calls it) | Test + `/code-review` each green PR, label `READY-VERIFIED`, order the merge queue |
+| `/crew:build` | Your session, for one feature built in place | The same build protocol, without worktrees |
+
+`/crew:session` starts by checking for a `.claude-bootstrap.md`. With none, it is the
+conductor and acts like one; only the conductor merges or touches your checkout.
+
+### Conductor commands (`/crew:session ...`)
 
 | Command | What it does |
 |---------|-------------|
-| `/session list` | Worktrees + psmux windows + health |
-| `/session start <name>` | Create worktree, junction deps, dispatch a worker, auto-start a monitor loop |
-| `/session start-issues 510 511 512` | **Bulk** — one worker per GitHub issue (branch/window `fix/<n>-<slug>`) |
-| `/session resume <name>` | Health-check + repair + re-dispatch |
-| `/session finish <name>` | Commit → test → rebase → push → PR (no merge) |
-| `/session monitor <name>` | One poll cycle for one worker |
-| `/session pull` | PR dashboard, pull merged work, cleanup |
-| `/session cleanup` | Remove zombie worktrees + orphan windows |
-| `/session server-start\|check\|stop` | Manage a detached dev server |
-| `/session orchestrate [dashboard\|dispatch\|poll\|verify\|verify-all\|pull\|cleanup]` | Unified orchestrator loop |
+| `status` | Watchdog: is every terminal up and working (`running` / `pending` / `exited` / `missing`)? Fixes overseers, then relays their reports. `launch` loops it every 10 min |
+| `plan <spec...>` | Spec with no issues yet → issues cut from the spec (open questions asked, nothing invented), created on your go, wave 1 dispatched |
+| `start <name>` / `start-issues 510 511 512` | Dispatch one worker / one per GitHub issue, then `launch` if needed |
+| `launch` | Start the orchestrator (+ reviewer) if they aren't running |
+| `relay <worker> "<msg>"` | Send your feedback into a worker's window (via `send-to-worker.ps1`, which verifies it was submitted) |
+| `local <worker\|PR#>` | Run a worker's branch on your machine (`-AutoPort`), or give the preview URL |
+| `merge <PR#...>` | Base check → overlap order → squash-merge into `<base>` |
+| `pull` | Bring merged work from `<base>` into your checkout |
+| `done <worker>` | Junction-first teardown, only when you say a worker is done |
+| `list` / `resume` / `restore` / `finish` / `cleanup` / `server-*` | Housekeeping |
 
-### Launch the autonomous orchestrator
+### The integration branch (`defaultBranch`)
+
+Set `defaultBranch` to `"auto"` (or leave it out) and it is detected from where your merged
+feature PRs actually land: a feature → staging → master repo resolves to `staging`, even
+though GitHub's default is `master`. With no PR history it falls back to a `staging` /
+`develop` / `dev` branch on origin, then origin's default. A pinned value is used as-is (with
+a warning if it pins `main`/`master` while a `staging`/`develop` branch exists). See what was
+resolved with `scripts/status/resolve-config.ps1`.
+
+### The project board (GitHub Projects)
+
+Issues and PRs go through the `gh` CLI; the project board goes through the **GitHub Projects
+MCP**, never `gh project`. Set `"githubProject": { "ownerKind": "USER", "owner": "<login>",
+"number": <n> }` in the config. The conductor is the board's only writer and moves each issue
+along the board as the build does: **Todo** when planned (**Blocked** while it waits on you),
+**In Progress** when a worker starts, **In review** when its PR opens, **Deployed: Staging**
+when merged to staging, **Done / Production** when it reaches production. It classifies by
+reading each issue: **Pillar** (the product's area, plumbing or feature), **Phase**
+(Foundation = plumbing, Develop = feature-facing), one kind **label**, never Work type. It
+fills only fields the spec or you state; required fields it can't source are left empty and
+listed.
+Protocol: `skills/session/reference/commands-board.md`.
+
+### The orchestrator
+
+`/crew:session launch` runs:
 
 ```
 pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
 ```
 
 It spawns a dedicated orchestrator Claude with the no-auto-merge + batch-scoped
-brief, runs one immediate poll, then `/loop 5m /session orchestrate poll`. It
-flags green PRs as `READY FOR USER REVIEW`, cleans up after **you** merge, and
-self-terminates when no workers and no batch PRs remain.
+brief, runs one immediate poll, then `/loop 5m /crew:orchestrate poll`. It
+flags green PRs as `READY FOR USER REVIEW`, reports what **you** merged (the worker stays
+alive until you say it's done), and self-terminates when no workers and no batch PRs remain.
 
 Stop it early: `psmux kill-window -t <session>:orchestrator`.
 
@@ -293,7 +333,7 @@ Stop it early: `psmux kill-window -t <session>:orchestrator`.
 - **Worker can't spawn its agent team / Task tool disabled** — the psmux server inherited `CLAUDECODE=1`. The dispatch scripts clear it (`$env:CLAUDECODE=$null`) in the pane before launch. If you launch manually, do the same.
 - **`claude` not found in a pane** — psmux pwsh runs `-NoProfile` (no npm PATH). Always use the full `workerCmdPath`.
 - **Worker died at launch / accept dialog** — the bypass-permissions accept screen needs option `2`, and the brief must be sent only after the "bypass permissions on" footer appears. The dispatch scripts poll `capture-pane` for this handshake instead of blind-sleeping.
-- **Nudge text sits unsubmitted at `❯`** — Claude swallows Enter while a tool runs. Send a standalone `psmux send-keys ... Enter` after the message; the scripts do this.
+- **Nudge text sits unsubmitted at `❯`** — the first submit keypress after typing is sometimes eaten (`Enter` and `C-m` alike, notably early in a session), and right after typing the input box can briefly draw empty. Seen on a live launch, where every window's brief sat unsent. The scripts use `Send-PaneMessage`: wait until the text shows in the box, submit, and repeat until it leaves. Send your own messages with `scripts/dispatch/send-to-worker.ps1`, which does the same. To free a stuck window by hand, press submit again: `psmux send-keys -t <sess>:<name> C-m`.
 - **Main repo's node_modules got gutted** — something ran `git worktree remove` with the junction still attached. Always tear down via `close-worker.ps1`.
 - **Locked worktree dir won't delete** — use `pwsh -c "Remove-Item -Recurse -Force <path>"` (long paths enabled); `teardown/nuke-worktrees.ps1` has robocopy/rename fallbacks.
 - **Worktrees must live OUTSIDE the repo** — never use the Agent tool's in-repo `isolation: worktree`; it commits gitlinks that corrupt `git status`. Worktrees go in the sibling `worktreesPath`.

@@ -155,6 +155,93 @@ Describe "Dispatch robustness: Windows PowerShell 5.1 (npm EBADENGINE killed dis
     }
 }
 
+Describe "One skill per role (conductor / orchestrator / reviewer)" {
+    BeforeAll {
+        $script:PluginRoot = Split-Path $script:ScriptsDir -Parent
+        $script:SkillsDir  = Join-Path $script:PluginRoot "skills"
+        function Get-SkillText([string]$Name) { Get-Content (Join-Path $script:SkillsDir "$Name\SKILL.md") -Raw }
+    }
+
+    It "<_> skill exists and its frontmatter name matches its folder" -ForEach @('session', 'orchestrate', 'review') {
+        (Get-SkillText $_) | Should -Match "(?m)^name: $_\s*$"
+    }
+
+    It "the conductor skill decides its role from .claude-bootstrap.md and takes the conductor role without it" {
+        $s = Get-SkillText 'session'
+        $s | Should -Match 'Which role are you'
+        $s | Should -Match '\.claude-bootstrap\.md'
+        $s | Should -Match 'you are the \*\*conductor\*\*'
+    }
+
+    It "the conductor skill covers <_>" -ForEach @('status', 'plan', 'relay', 'local', 'merge', 'pull', 'done', 'launch') {
+        (Get-SkillText 'session') | Should -Match "(?m)^## ``$_"
+    }
+
+    It "the conductor watches the terminals (status watchdog loop), but never runs a per-worker monitor loop" {
+        $s = Get-SkillText 'session'
+        $s | Should -Not -Match '/loop \S+ /\S*session monitor'
+        $s | Should -Match '/loop 10m /crew:session status'
+        $s | Should -Match 'check-crew-health\.ps1'
+    }
+
+    It "the conductor relays through send-to-worker.ps1, not a bare send-keys with a message" {
+        $s = Get-SkillText 'session'
+        $s | Should -Match 'send-to-worker\.ps1'
+        $s | Should -Not -Match 'psmux send-keys -t <sess>:<name> "<message>"'
+    }
+
+    It "the conductor merges into the RESOLVED base and checks each PR's base first" {
+        $s = Get-SkillText 'session'
+        $s | Should -Match 'resolve-config\.ps1'
+        $s | Should -Match 'gh pr edit <n> --base <base>'
+    }
+
+    It "the <_> skill sends a non-owner back to /crew:session" -ForEach @('orchestrate', 'review') {
+        $s = Get-SkillText $_
+        $s | Should -Match '\.claude-bootstrap\.md'
+        $s | Should -Match '/crew:session'
+    }
+
+    It "the orchestrator brief runs /crew:orchestrate poll, in its /loop too" {
+        $body = Get-Content $script:OrchScript -Raw
+        $body | Should -Match '``/crew:orchestrate poll``'
+        $body | Should -Match '/loop \$\{IntervalMin\}m /crew:orchestrate poll'
+    }
+
+    It "the reviewer brief runs /crew:review, in its /loop too" {
+        $body = Get-Content $script:ReviewerScript -Raw
+        $body | Should -Match '``/crew:review``'
+        $body | Should -Match '/loop \$\{IntervalMin\}m /crew:review'
+    }
+
+    It "the orchestrator never tears workers down (brief + its reference)" {
+        $brief = Get-Content $script:OrchScript -Raw
+        $brief | Should -Not -Match 'CloseWorkerScript'
+        $brief | Should -Match 'NEVER tear down a worker'
+        $ref = Get-Content (Join-Path $script:SkillsDir "orchestrate\reference\commands-orchestrate.md") -Raw
+        $ref | Should -Not -Match 'close-worker\.ps1"? -Name'
+        $ref | Should -Not -Match 'tear down via `close-worker'
+    }
+
+    It "nothing still calls the old /session orchestrate|monitor|review form" {
+        $offenders = Get-ChildItem $script:PluginRoot -Recurse -Include *.md, *.ps1 |
+            Where-Object { $_.Name -ne 'CHANGELOG.md' -and $_.FullName -notmatch '\\tests\\' } |
+            Select-String -Pattern '/session (orchestrate|monitor|review)\b' |
+            ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+
+    It "every relative link in the skills resolves to a file" {
+        $broken = foreach ($md in (Get-ChildItem $script:SkillsDir -Recurse -Filter *.md)) {
+            foreach ($m in [regex]::Matches((Get-Content $md.FullName -Raw), '\]\(([^)#:\s]+\.md)(#[^)]*)?\)')) {
+                $target = Join-Path $md.DirectoryName $m.Groups[1].Value
+                if (-not (Test-Path $target)) { "{0} -> {1}" -f $md.FullName.Substring($script:SkillsDir.Length), $m.Groups[1].Value }
+            }
+        }
+        $broken -join "`n" | Should -BeNullOrEmpty
+    }
+}
+
 Describe "Orchestrator + reviewer launch with transcript saving on" {
     It "<_> clears CLAUDE_CODE_CHILD_SESSION and forces session persistence" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1') {
         $body = Get-Content (Join-Path $script:ScriptsDir "dispatch\$_") -Raw
@@ -236,5 +323,333 @@ Describe "start-orchestrator.ps1 auto-launches the reviewer" {
     It "excludes the reviewer infra worktrees from the batch" {
         $body = Get-Content $script:OrchScript -Raw
         $body | Should -Match 'review-checkout'
+    }
+}
+
+Describe "Get-PaneState (the watchdog's pane classifier)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "a bare pwsh prompt at the bottom means the CLI exited" {
+        (Get-PaneState -Lines @("some output", "", "PS C:\Users\me\proj>")).State | Should -Be "exited"
+    }
+
+    It "an empty pane counts as exited" {
+        (Get-PaneState -Lines @("", "  ")).State | Should -Be "exited"
+    }
+
+    It "typed-but-unsent input in Claude's box is pending, with the text in Detail (seen live)" {
+        $pane = @(
+            "✻ Cooked for 11s · done 2:16 AM",
+            "────────────────────",
+            "❯ WaitforCIonce1e085andreportback",
+            "────────────────────",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)"
+        )
+        $v = Get-PaneState -Lines $pane
+        $v.State  | Should -Be "pending"
+        $v.Detail | Should -Match 'WaitforCIonce1e085andreportback'
+    }
+
+    It "an empty input box with the footer is running" {
+        $pane = @("● Done.", "────────", "❯ ", "────────", "  ⏵⏵ bypass permissions on (shift+tab to cycle)")
+        (Get-PaneState -Lines $pane).State | Should -Be "running"
+    }
+
+    It "an old submitted prompt far above the bottom is not mistaken for pending input" {
+        $pane = @("❯ build the intake form") + @(1..10 | ForEach-Object { "working line $_" }) + @("❯ ", "  ⏵⏵ bypass permissions on")
+        (Get-PaneState -Lines $pane).State | Should -Be "running"
+    }
+}
+
+Describe "Spec -> issues: plan never invents, and the spec reaches the worker" {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1")
+        . (Join-Path $PSScriptRoot "..\scripts\lib\_session-brief.ps1")
+        $script:PlanRef = Get-Content (Join-Path $PSScriptRoot "..\skills\session\reference\commands-plan.md") -Raw
+    }
+
+    It "reads Spec and Work type from a planned issue's header" {
+        $body = "Spec: specs/intake.md`nSpec section: §4 Form`nWork type: feature`nLane: frontend`n`n## What the spec says`n> ..."
+        $h = Get-IssueBriefHints -Body $body
+        $h.Spec | Should -Be "specs/intake.md"
+        $h.Mode | Should -Be "feature"
+    }
+
+    It "accepts bolded and backticked header lines" {
+        $h = Get-IssueBriefHints -Body "**Spec:** ``docs/specs/f012-billing.md```n**Work type:** Iteration"
+        $h.Spec | Should -Be "docs/specs/f012-billing.md"
+        $h.Mode | Should -Be "iteration"
+    }
+
+    It "returns nothing for an ordinary issue, so the old default still applies" {
+        $h = Get-IssueBriefHints -Body "The login button is misaligned on mobile.`nSteps: ..."
+        $h.Spec | Should -BeNullOrEmpty
+        $h.Mode | Should -BeNullOrEmpty
+    }
+
+    It "a planned issue briefs the worker to build to the spec as a feature, not an iteration" {
+        $cfg = Get-Content (Join-Path $PSScriptRoot "..\examples\session-plugin.root.json") -Raw | ConvertFrom-Json
+        $h = Get-IssueBriefHints -Body "Spec: specs/intake.md`nWork type: feature"
+        $brief = New-WorkerBrief -Config $cfg -Name "fix-12-intake" -Branch "fix/12-intake" -Task "t" -IssueNumber 12 -Spec $h.Spec -Mode $h.Mode
+        $brief | Should -Match 'NEW FEATURE'
+        $brief | Should -Match 'specs/intake\.md'
+    }
+
+    It "the bulk dispatcher passes the issue's hints into the brief" {
+        $body = Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\psmux-dispatch-issues.ps1") -Raw
+        $body | Should -Match 'Get-IssueBriefHints'
+    }
+
+    It "plan's rules: silence in the spec becomes an open question, never a made-up value" {
+        $script:PlanRef | Should -Match 'Never make criteria up'
+        $script:PlanRef | Should -Match 'open question'
+        $script:PlanRef | Should -Match 'needs-decision'
+    }
+
+    It "plan shows the plan and creates nothing until the user says go" {
+        $script:PlanRef | Should -Match 'create nothing yet'
+    }
+
+    It "plan creates issues with --body-file (inline bodies got mangled)" {
+        $script:PlanRef | Should -Match '--body-file'
+    }
+}
+
+Describe "Overseer launch: boot handshake + same plugin copy (found by dogfooding)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "a pane stuck on the folder-trust screen is 'dialog', not running (captured live)" {
+        $pane = @(
+            "Accessingworkspace:",
+            "C:\...\app-worktrees\orchestrator",
+            "Quicksafetycheck:Isthisaprojectyoucreatedoroneyoutrust?",
+            "Securityguide",
+            "❯No,exit",
+            "Yes,Itrustthisfolder",
+            "Entertoconfirm·Esctocancel"
+        )
+        (Get-PaneState -Lines $pane).State | Should -Be "dialog"
+    }
+
+    It "<_> waits on the shared boot handshake instead of a blind sleep" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1', 'psmux-dispatch.ps1') {
+        $body = Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw
+        $body | Should -Match 'Wait-CliReady -Target'
+        $body | Should -Not -Match 'Start-Sleep -Seconds 8'
+    }
+
+    It "<_> launches Claude with --plugin-dir of its own plugin copy" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1', 'psmux-dispatch.ps1', 'dispatch-worktree.ps1') {
+        (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'Get-PluginDirArg'
+    }
+
+    It "Get-PluginRoot resolves to the folder holding this plugin's manifest" {
+        Test-Path (Join-Path (Get-PluginRoot) ".claude-plugin\plugin.json") | Should -BeTrue
+        Get-PluginDirArg | Should -Match '^--plugin-dir ".+claude-session-orchestrator"$'
+    }
+}
+
+Describe "Boot handshake answers first-run screens by navigation (captured live)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "the claude preset answers folder trust and the bypass warning by choosing an option, not by sending a digit" {
+        $p = Get-WorkerCliPreset -Name 'claude'
+        @($p.acceptScreens | ForEach-Object { $_.choose }) | Should -Contain 'Yes,Itrustthisfolder'
+        @($p.acceptScreens | ForEach-Object { $_.choose }) | Should -Contain 'Yes,Iaccept'
+        # "2" + Enter on the unnumbered trust screen picked "No, exit" and quit Claude.
+        $p.acceptSend | Should -BeNullOrEmpty
+    }
+
+    It "Wait-CliReady presses Down until the chosen option is highlighted, then Enter" {
+        $frames = [System.Collections.Generic.Queue[object]]::new()
+        $frames.Enqueue(@(" Security guide", " ❯ No, exit", "   Yes, I trust this folder", " Enter to confirm · Esc to cancel"))
+        $frames.Enqueue(@(" Security guide", "   No, exit", " ❯ Yes, I trust this folder", " Enter to confirm · Esc to cancel"))
+        $frames.Enqueue(@("❯ ", "  ⏵⏵ bypass permissions on (shift+tab to cycle)"))
+        $sent = [System.Collections.Generic.List[string]]::new()
+        # A stub defined here is what Wait-CliReady resolves (dynamic scoping), so no
+        # psmux is needed on the test machine.
+        function psmux {
+            if ($args[0] -eq 'capture-pane') { return $frames.Dequeue() }
+            if ($args[0] -eq 'send-keys') { $sent.Add(($args[3..($args.Count - 1)] -join ' ')) }
+        }
+        Mock Start-Sleep {}
+        $r = Wait-CliReady -Target 't:w' -Cli (Get-WorkerCliPreset -Name 'claude') -MaxWaitSec 30 6>$null
+        $r.Ready | Should -BeTrue
+        ($sent -join ',') | Should -Be 'Down,Enter'
+    }
+
+    It "the idle placeholder hint in Claude's input line is not unsent input (captured live)" {
+        $pane = @("● security: hooks.json: unknown key ""notes"" ignored", "────", "❯ Try ""how do I log an error?""", "────", "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents")
+        (Get-PaneState -Lines $pane).State | Should -Be "running"
+    }
+}
+
+Describe "Messages are sent through the verified path, not a bare send-keys + Enter (found by dogfooding)" {
+    It "<_> submits with C-m" -ForEach @('psmux-dispatch.ps1', 'send-to-worker.ps1', 'start-orchestrator.ps1', 'start-reviewer.ps1') {
+        # A single blind submit left every brief in a live launch sitting unsent.
+        $offenders = Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") |
+            Where-Object { $_ -match '^\s*(if \(.*\) \{ )?psmux send-keys .*\bEnter\b' }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+
+    It "the overseers nudge workers through send-to-worker.ps1" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1') {
+        (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'send-to-worker\.ps1'
+    }
+
+    It "no skill tells anyone to nudge with a bare send-keys ... Enter" {
+        $offenders = Get-ChildItem (Join-Path $PSScriptRoot "..\skills") -Recurse -Filter *.md |
+            Select-String -Pattern 'send-keys -t <sess>:<\w+> "[^"]*" Enter' |
+            ForEach-Object { "{0}:{1}" -f $_.Filename, $_.LineNumber }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Send-PaneMessage: see the text, submit, retry until it leaves the box (captured live)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "waits past the empty-box render lag, and retries the eaten first submit" {
+        $R = '────────────────────────────────────────'
+        $frames = [System.Collections.Generic.Queue[object]]::new()
+        $frames.Enqueue(@($R, "❯", $R, "  ⏵⏵ bypass permissions on"))                                                  # text not drawn yet
+        $frames.Enqueue(@($R, "❯ Read .claude-bootstrap.md and follow it exactly.", "", $R, "  ⏵⏵ bypass permissions on"))  # text visible
+        $frames.Enqueue(@($R, "❯ Read .claude-bootstrap.md and follow it exactly.", "", $R, "  ⏵⏵ bypass permissions on"))  # 1st C-m eaten
+        $frames.Enqueue(@("✢ Gusting…", $R, "❯", $R, "  ⏵⏵ bypass permissions on · esc to interrupt"))                  # 2nd C-m went
+        $sent = [System.Collections.Generic.List[string]]::new()
+        function psmux {
+            if ($args[0] -eq 'capture-pane') { return $frames.Dequeue() }
+            if ($args[0] -eq 'send-keys') { $sent.Add($args[-1]) }
+        }
+        Mock Start-Sleep {}
+        Send-PaneMessage -Target 't:w' -Text "Read .claude-bootstrap.md and follow it exactly." 6>$null | Should -BeTrue
+        ($sent -join ' | ') | Should -Be 'Read .claude-bootstrap.md and follow it exactly. | C-m | C-m'
+    }
+
+    It "an empty box before the text has appeared is NOT success (the bug that passed a stuck brief)" {
+        $R = '────────────────────────────────────────'
+        Get-InputBoxText -Lines @($R, "❯", $R) | Should -Be ""
+        Get-InputBoxText -Lines @($R, "❯ Read .claude-bootstrap.md", "", $R) | Should -Be "Read.claude-bootstrap.md"
+        Get-InputBoxText -Lines @($R, "❯ Try ""how do I log an error?""", $R) | Should -Be ""
+        Get-InputBoxText -Lines @("no box here") | Should -BeNullOrEmpty
+    }
+
+    It "<_> sends its brief through Send-PaneMessage" -ForEach @('psmux-dispatch.ps1', 'start-orchestrator.ps1', 'start-reviewer.ps1', 'send-to-worker.ps1') {
+        (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'Send-PaneMessage -Target'
+    }
+}
+Describe "Test-InputSubmitted needs positive evidence (captured live)" {
+    BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
+
+    It "busy footer counts as submitted" {
+        Test-InputSubmitted -Lines @("✽ Levitating… (1m 18s)", "❯", "  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt") | Should -BeTrue
+    }
+    It "an empty box counts as submitted" {
+        Test-InputSubmitted -Lines @("● Done.", "❯ ", "  ⏵⏵ bypass permissions on") | Should -BeTrue
+    }
+    It "text still in the box is not submitted" {
+        Test-InputSubmitted -Lines @("❯ Read .claude-bootstrap.md and follow it exactly.", "  ⏵⏵ bypass permissions on") | Should -BeFalse
+    }
+    It "startup output with the input line out of view is NOT taken as submitted" {
+        Test-InputSubmitted -Lines @("● planning: hooks.json: unknown key ""notes"" ignored", "● agents-md: no CLAUDE.md found; AGENTS.md loaded") | Should -BeFalse
+    }
+}
+
+Describe "GitHub: gh for issues/PRs, the GitHub Projects MCP for the board" {
+    BeforeAll {
+        $script:SkillsDir = Join-Path $PSScriptRoot "..\skills"
+        $script:Board = Get-Content (Join-Path $script:SkillsDir "session\reference\commands-board.md") -Raw
+        $script:Conductor = Get-Content (Join-Path $script:SkillsDir "session\SKILL.md") -Raw
+    }
+
+    It "no skill or script runs a gh project command (the board goes through the MCP)" {
+        # Mentions of `gh project` in a "never" are fine; an actual subcommand is not.
+        $pluginRoot = Join-Path $PSScriptRoot ".."
+        $offenders = Get-ChildItem $pluginRoot -Recurse -Include *.md, *.ps1 |
+            Where-Object { $_.FullName -notmatch '\\tests\\' -and $_.Name -ne 'CHANGELOG.md' } |
+            Select-String -Pattern 'gh project (item-add|item-edit|item-list|item-create|field-list|list|view|create|edit|link)\b' |
+            ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+        $offenders -join "`n" | Should -BeNullOrEmpty
+    }
+
+    It "the board protocol names the GitHub Projects MCP tools it relies on" {
+        foreach ($tool in 'github_resolve_issue', 'project_add_item_with_fields', 'project_update_item_field', 'project_list_fields', 'project_search_items') {
+            $script:Board | Should -Match $tool
+        }
+    }
+
+    It "the conductor is the board's only writer, and the overseers are told not to write it" {
+        $script:Board | Should -Match 'only the \*\*conductor\*\* changes the board'
+        foreach ($s in 'orchestrate', 'review') {
+            (Get-Content (Join-Path $script:SkillsDir "$s\SKILL.md") -Raw) | Should -Match 'Change the project board'
+        }
+    }
+
+    It "the conductor may call the board tools without a permission prompt" {
+        $script:Conductor | Should -Match 'allowed-tools:.*mcp__claude_ai_GitProjects__project_update_item_field'
+    }
+
+    It "the build moves items along Status: <_>" -ForEach @('Todo', 'Backlog', 'Blocked', 'In Progress', 'In review', 'Done') {
+        $script:Board | Should -Match "\*\*$_\*\*"
+    }
+
+    It "the environment is Deployed, not Status (Staging, then Production)" {
+        $script:Board | Should -Match '\*\*Deployed\*\*'
+        $script:Board | Should -Match 'stays \*\*In review\*\* \| \*\*Staging\*\*'
+        $script:Board | Should -Match '\*\*Done\*\* \| \*\*Production\*\*'
+    }
+
+    It "Blocked means waiting on a person, not on another issue" {
+        $script:Board | Should -Match 'Blocked means waiting on a person'
+    }
+
+    It "the crew never claims verification, and never invents field values" {
+        $script:Board | Should -Match 'the crew never claims verification'
+        $script:Board | Should -Match 'Never guess a priority, a date or a pillar'
+    }
+
+    It "an unavailable connector is reported, not silently skipped or replaced by gh project" {
+        $script:Board | Should -Match "isn't connected"
+        $script:Board | Should -Match 'do not fall\s+back to `gh project`'
+    }
+
+    It "resolve-config exposes the board" {
+        (Get-Content (Join-Path $PSScriptRoot "..\scripts\status\resolve-config.ps1") -Raw) | Should -Match 'githubProject'
+    }
+}
+
+Describe "Board taxonomy: AI classifies, Module is the one field, trackers for big pieces" {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1")
+        . (Join-Path $PSScriptRoot "..\scripts\lib\_session-brief.ps1")
+        $script:Board = Get-Content (Join-Path $PSScriptRoot "..\skills\session\reference\commands-board.md") -Raw
+        $script:Plan  = Get-Content (Join-Path $PSScriptRoot "..\skills\session\reference\commands-plan.md") -Raw
+    }
+
+    It "the conductor never sets Work type; the kind of change is one label" {
+        $script:Board | Should -Match '\*\*Work type\*\* \| \| \*\*Don''t\.\*\*'
+        $script:Board | Should -Match 'Never `feature`, never `foundation`'
+        $script:Plan  | Should -Match 'Never set Work type'
+    }
+
+    It "Pillar is the area for plumbing and features alike; Phase says which" {
+        $script:Board | Should -Match '\*\*Pillar\*\* \| what area'
+        $script:Board | Should -Match 'plumbing and feature work \*\*alike\*\*'
+        $script:Board | Should -Match '\*\*Foundation\*\* for plumbing'
+        $script:Board | Should -Not -Match 'Platform —'
+        $script:Board | Should -Not -Match '\*\*Module\*\*'
+    }
+
+    It "never copies a label into a field" {
+        $script:Board | Should -Match 'Never copy a\s+label into a field'
+    }
+
+    It "a tracker is a [Tracker] parent with real sub-issues (gh) and a filtered tab (MCP)" {
+        $script:Board | Should -Match '\[Tracker\]'
+        $script:Board | Should -Match 'issues/<tracker#>/sub_issues'
+        $script:Board | Should -Match 'project_create_view'
+        $script:Board | Should -Match 'filter_text: "parent-issue:<owner>/<repo>#<tracker#>"'
+        $script:Plan  | Should -Match 'create a \*\*tracker\*\* first'
+    }
+
+    It "the issue header is 'Mode:', and old 'Work type:' issues still dispatch correctly" {
+        (Get-IssueBriefHints -Body "Spec: specs/a.md`nMode: feature").Mode | Should -Be 'feature'
+        (Get-IssueBriefHints -Body "Spec: specs/a.md`nWork type: iteration").Mode | Should -Be 'iteration'
     }
 }

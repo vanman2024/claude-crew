@@ -137,10 +137,10 @@ orchestrator polls workers.
 ## Send a message to a worker (no focus theft)
 
 ```powershell
-psmux send-keys -t <sess>:<window> "<message>" Enter
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <window> -Message "<message>" -Config "<repo>/.claude/session-plugin.json"
 ```
 If the worker is mid-tool, Claude can swallow the Enter — follow up with a
-standalone `psmux send-keys -t <sess>:<window> "" Enter` and verify with
+standalone `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <window> -Message "" -Config "<repo>/.claude/session-plugin.json"` and verify with
 `capture-pane`.
 
 ---

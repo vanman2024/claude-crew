@@ -2,20 +2,24 @@
 
 > Paths/session/repo/branch come from `.claude/session-plugin.json` (`<repo>`=repoPath, `<wt>`=worktreesPath, `<sess>`=psmuxSession, `<gh>`=githubRepo, `<base>`=defaultBranch).
 
-Show PR status dashboard, pull merged work into `<base>`, cleanup landed worktrees.
+Show PR status dashboard, pull merged work into `<base>`, offer teardown of landed workers.
 Run from the MAIN session. **Principle: show everything, touch nothing, until user says go.**
 
 ---
 
 ## Phase 1 — Safety checks
 
-1. Verify the main repo is on `<base>`:
+1. Verify the main repo is on `<base>` (the RESOLVED branch from `status/resolve-config.ps1`,
+   not the raw JSON, which may say `auto`):
    ```
-   pwd && git branch --show-current
+   git -C <repo> branch --show-current
    ```
+   On another branch → say which, and ask. Never switch branches under the user.
 
-2. Check uncommitted changes: `git status --porcelain`
-   - Changes exist → ask user to commit first
+2. Check uncommitted changes: `git -C <repo> status --porcelain`
+   - Changes exist → show a grouped summary (count by top-level directory; deleted vs
+     modified vs untracked) and ask what the user wants. Never stash, commit or discard
+     their work unasked.
    - User says NO → STOP
 
 3. Fetch: `git fetch origin <base>`
@@ -71,17 +75,16 @@ Run from the MAIN session. **Principle: show everything, touch nothing, until us
 12. Type check / smoke test using the project's test commands from `config.layout`
     (per-part `testCmd`, e.g. a typecheck). If it fails → warn, ask if continue.
 
-## Phase 6 — Cleanup landed worktrees
+## Phase 6 — Landed workers: list them, don't tear them down
 
-13. For each MERGED + pulled PR, tear down its worktree with the teardown
-    helper. Prefer `close-worker.ps1` for a single worktree — it is junction-first
-    (removes the `node_modules` junction LINK before `git worktree remove`, so
-    git never follows the junction into the main repo's `node_modules`), kills the
-    psmux window, then runs `git worktree remove --force` and `git worktree prune`:
+13. Workers stay alive after merge: the user may iterate on them or give them more work.
+    List each worker whose PR is now MERGED and ask whether any are done. Only for the ones
+    the user names, tear down with the junction-first helper (removes the `node_modules`
+    junction LINK before `git worktree remove`, kills the psmux window, prunes):
     ```
     pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name "<name>" -Config "<repo>/.claude/session-plugin.json"
     ```
-    Then delete the remote branch: `git push origin --delete "feature/<name>" 2>/dev/null || true`
+    Then delete that remote branch: `git push origin --delete "<branch>"`
 
 14. Detect zombies: compare the filesystem (dirs under `<wt>`) against
     `git worktree list`. A dir present on disk but not in git's list is a zombie.

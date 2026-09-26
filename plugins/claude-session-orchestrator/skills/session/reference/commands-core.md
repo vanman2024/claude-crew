@@ -182,26 +182,16 @@ window's shell is already rooted there. Watch it with `psmux capture-pane -t <se
 Branch, worktree path, psmux target (`<sess>:<name>`), and the attach command
 (`psmux attach -t <sess>`).
 
-### Step 10: Auto-start monitoring loop
+### Step 10: Make sure the orchestrator is watching
 
-**CRITICAL — Do NOT skip this step.** After dispatch, immediately start the monitor loop:
+**Do NOT skip this step.** A dispatched worker needs someone polling it, or it drifts and
+builds nothing. That someone is the orchestrator, not this session: check
+`psmux list-windows -t <sess>` for an `orchestrator` window and, if there isn't one, run
+`launch` (`start-orchestrator.ps1`). Its `/loop` polls every worker, new ones included.
 
-```
-/loop 3m /session monitor <name>
-```
-
-This invokes `/session monitor <name>` every 3 minutes. The monitor:
-1. Checks if a PR exists for `feature/<name>` → if yes, reports COMPLETE.
-2. Reads the worker's pane via `psmux capture-pane -t <sess>:<name> -p`.
-3. Checks git progress (commits ahead of `<base>`, uncommitted changes).
-4. Analyzes agent state (building, stuck, sidetracked, erroring, done).
-5. Sends corrective instructions via `psmux send-keys -t <sess>:<name> "<msg>" Enter` when needed.
-6. Reports status.
-
-See [commands-monitor.md](commands-monitor.md) for the full protocol.
-
-**The orchestrator's job is NOT done when the terminal opens.** The loop runs automatically
-until PR creation or user intervention.
+The conductor does NOT start a per-worker monitor loop. Its own loop is the `status` watchdog
+(`/loop 10m /crew:session status`, started by `launch`), which checks every terminal is up,
+including this new worker's, and reads the orchestrator's report.
 
 ---
 
@@ -281,4 +271,4 @@ PR URL, branch, commit count.
 
 **IMPORTANT**: `finish` does NOT merge, does NOT touch `<base>`, does NOT remove worktrees.
 Only: commit → test → rebase → push → PR → report.
-Merging + cleanup → `/session pull` (after the user authorizes the merge).
+Merging → `/crew:session merge <PR#>` (after the user authorizes it), then `pull` to bring it into the main checkout.

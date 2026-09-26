@@ -1,4 +1,4 @@
-﻿# psmux-dispatch.ps1
+# psmux-dispatch.ps1
 #
 # Full worktree dispatch using psmux (the Windows tmux port). Project-agnostic:
 # every path / session / branch comes from the consuming project's
@@ -184,7 +184,7 @@ function Send-WorkerLaunch {
         $clearLine = ($Cli.clearEnv | ForEach-Object { "`$env:$_=`$null" }) -join '; '
         psmux send-keys -t $Target $clearLine
         Start-Sleep -Milliseconds 400
-        psmux send-keys -t $Target Enter
+        psmux send-keys -t $Target C-m
         Start-Sleep -Milliseconds 800
     }
     # Clearing the child marker is not enough on its own - persistence must also be
@@ -194,65 +194,20 @@ function Send-WorkerLaunch {
         $setLine = ($Cli.setEnv.GetEnumerator() | ForEach-Object { "`$env:$($_.Key)='$($_.Value)'" }) -join '; '
         psmux send-keys -t $Target $setLine
         Start-Sleep -Milliseconds 400
-        psmux send-keys -t $Target Enter
+        psmux send-keys -t $Target C-m
         Start-Sleep -Milliseconds 800
     }
     psmux send-keys -t $Target $LaunchLine
     Start-Sleep -Seconds 1
-    psmux send-keys -t $Target Enter
+    psmux send-keys -t $Target C-m
 }
 
-# Poll the pane until the REPL is ready, auto-handling the first-run accept screen.
-# With -DetectResumeFailure, also watch for the CLI printing that there is no prior
-# conversation to resume (it then exits to a shell) and report that distinctly so the
-# caller can relaunch fresh. Returns @{ Ready=$bool; ResumeFailed=$bool }.
-function Wait-WorkerReady {
-    param([string]$Target, $Cli, [switch]$DetectResumeFailure)
-    $resumeFailMarkers = @('Noconversationfoundtocontinue', 'Noconversationtoresume', 'Nosessionstoresume', 'Nosessionfound')
-    $hasPatterns = ($Cli.acceptMatchAny.Count -gt 0) -or ($Cli.readyMatchAny.Count -gt 0)
-    if (-not $hasPatterns) {
-        Step "Profile '$($Cli.name)' has no accept/ready patterns - fixed boot wait $($Cli.bootWaitSec)s"
-        Start-Sleep -Seconds $Cli.bootWaitSec
-        return [pscustomobject]@{ Ready = $true; ResumeFailed = $false }
-    }
-    Step "Waiting for '$($Cli.name)' to be ready (auto-handling its accept screen if any)"
-    $accepted = $false; $ready = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        Start-Sleep -Seconds 3
-        $pane = (psmux capture-pane -t $Target -p 2>$null) -join "`n"
-        $flat = ($pane -replace '\s', '')
-        if ($DetectResumeFailure) {
-            foreach ($m in $resumeFailMarkers) {
-                if ($flat.Contains($m)) {
-                    Step "Resume could not attach (worker reported no prior conversation)"
-                    return [pscustomobject]@{ Ready = $false; ResumeFailed = $true }
-                }
-            }
-        }
-        if (-not $accepted -and $Cli.acceptMatchAny.Count -gt 0) {
-            $hit = $false
-            foreach ($pat in $Cli.acceptMatchAny) { if ($flat.Contains($pat)) { $hit = $true; break } }
-            if ($hit) {
-                if ($Cli.acceptSend) {
-                    Step "Accept screen detected - sending '$($Cli.acceptSend)'"
-                    psmux send-keys -t $Target $Cli.acceptSend Enter
-                }
-                $accepted = $true
-                continue
-            }
-        }
-        if ($Cli.readyMatchAny.Count -gt 0) {
-            $rhit = $false
-            foreach ($pat in $Cli.readyMatchAny) { if ($flat.Contains($pat)) { $rhit = $true; break } }
-            if ($rhit) { $ready = $true; Step "REPL ready after ~$([int](($i + 1) * 3))s"; break }
-        }
-    }
-    if (-not $ready) { Step "WARN: did not positively detect the ready prompt" }
-    return [pscustomobject]@{ Ready = $ready; ResumeFailed = $false }
-}
+# Boot handshake (first-run screens, ready footer, resume failure): Wait-CliReady in the lib.
 
 $target   = "${Session}:${Name}"
 $argLine  = ($WorkerCli.args -join ' ')
+# A Claude worker loads the same crew copy as this script (see Get-PluginDirArg).
+if ($WorkerCli.name -eq 'claude') { $argLine = "$(Get-PluginDirArg) $argLine".Trim() }
 # The fresh (no-resume) launch line is also the fallback when a resume can't attach.
 $freshLaunchLine = if ($argLine) { "$WorkerCmd $argLine" } else { "$WorkerCmd" }
 $launchLine = $freshLaunchLine
@@ -278,7 +233,7 @@ if ($Continue) {
 
 Step "Launching worker CLI '$($WorkerCli.name)' in $target ($launchLine)"
 Send-WorkerLaunch -Target $target -Cli $WorkerCli -LaunchLine $launchLine
-$wait = Wait-WorkerReady -Target $target -Cli $WorkerCli -DetectResumeFailure:$attemptingResume
+$wait = Wait-CliReady -Target $target -Cli $WorkerCli -DetectResumeFailure:$attemptingResume
 
 # Graceful fallback: a resume that finds no prior conversation prints "No conversation
 # found to continue" and drops to a SHELL prompt - any nudge we then send is typed
@@ -288,38 +243,40 @@ $wait = Wait-WorkerReady -Target $target -Cli $WorkerCli -DetectResumeFailure:$a
 $resumedFresh = $false
 if ($attemptingResume -and ($wait.ResumeFailed -or -not $wait.Ready)) {
     Step "Resume unavailable - relaunching FRESH in the same worktree ($freshLaunchLine)"
-    psmux send-keys -t $target "" Enter   # clear any stray shell prompt left by the failed resume
+    psmux send-keys -t $target "" C-m   # clear any stray shell prompt left by the failed resume
     Start-Sleep -Milliseconds 500
     Send-WorkerLaunch -Target $target -Cli $WorkerCli -LaunchLine $freshLaunchLine
-    $wait = Wait-WorkerReady -Target $target -Cli $WorkerCli
+    $wait = Wait-CliReady -Target $target -Cli $WorkerCli
     $resumedFresh = $true
 }
 if (-not $wait.Ready) { Step "WARN: worker not positively ready; sending its message anyway" }
 
+$message = $null
 # Steer the worker. A fresh relaunch (resume failed) needs the bootstrap PLUS a
 # git-state recovery nudge - it has no transcript to lean on.
 if ($Continue -and $NoNudge -and -not $resumedFresh) {
     Step "Continue mode (-NoNudge): worker resumed, left idle at the prompt for you to drive"
 } elseif ($resumedFresh) {
     Step "Sending fresh-restart bootstrap (resume failed - recover from git state)"
-    psmux send-keys -t $target "Your previous session could not be auto-resumed (no saved conversation), so this is a fresh start in the SAME worktree. FIRST read .claude-bootstrap.md and follow it exactly - including creating your task list. THEN run git status and git log to see what already landed and CONTINUE from there to a PR. Do NOT restart from scratch or redo finished work. You are autonomous: do not stop to ask for permission." Enter
+    $message = "Your previous session could not be auto-resumed (no saved conversation), so this is a fresh start in the SAME worktree. FIRST read .claude-bootstrap.md and follow it exactly - including creating your task list. THEN run git status and git log to see what already landed and CONTINUE from there to a PR. Do NOT restart from scratch or redo finished work. You are autonomous: do not stop to ask for permission."
 } elseif ($Continue) {
     Step "Sending resume nudge"
-    psmux send-keys -t $target "Your terminal was interrupted (crash / power loss / reboot) and this session was just resumed. Re-check git status and your last few steps to see what already landed, then CONTINUE your task straight through to a PR. Do not restart from scratch or redo finished work." Enter
+    $message = "Your terminal was interrupted (crash / power loss / reboot) and this session was just resumed. Re-check git status and your last few steps to see what already landed, then CONTINUE your task straight through to a PR. Do not restart from scratch or redo finished work."
 } else {
     Step "Sending bootstrap message"
     # Name the CLI's REAL task tool - a worker told to use a tool it does not have burns
     # its first turn discovering that and re-planning.
     $taskToolPlain = Get-TaskToolName -WorkerCli $WorkerCli.name -Plain
-    psmux send-keys -t $target "Read .claude-bootstrap.md in this worktree root and follow it exactly. Your FIRST action, before exploring or writing code, is to create your task list with $taskToolPlain (seed it with explore/plan/build/test/PR and refine as you go) - do not run a long exploration phase without one. You are autonomous: build straight through to a PR; do not stop to ask for permission." Enter
+    $message = "Read .claude-bootstrap.md in this worktree root and follow it exactly. Your FIRST action, before exploring or writing code, is to create your task list with $taskToolPlain (seed it with explore/plan/build/test/PR and refine as you go) - do not run a long exploration phase without one. You are autonomous: build straight through to a PR; do not stop to ask for permission."
 }
 
-# A long paste can absorb its own trailing Enter into the input box instead of
-# submitting. Send a standalone Enter to actually submit the prompt (skipped only
-# when we deliberately left a resumed worker idle).
-Start-Sleep -Seconds 2
+# Type the message and verify it was submitted (Send-PaneMessage: waits for the text to
+# show in the box, then submits until it leaves - the first submit is sometimes eaten).
+# Skipped only when we deliberately left a resumed worker idle.
 $leftIdle = ($Continue -and $NoNudge -and -not $resumedFresh)
-if (-not $leftIdle) { psmux send-keys -t $target "" Enter }
+if (-not $leftIdle) {
+    if (-not (Send-PaneMessage -Target $target -Text $message)) { Step "WARN: the worker's message is still unsent - psmux send-keys -t $target C-m" }
+}
 
 Step "DISPATCHED: $target  (attach with: psmux attach -t $Session)"
 Write-Host "SESSION=$Session"

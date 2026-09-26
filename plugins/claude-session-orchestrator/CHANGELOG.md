@@ -5,6 +5,107 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **One skill per role.** The user's own session, the orchestrator and the reviewer all
+  loaded the same `/crew:session` skill, which addressed its reader as the orchestrator. So
+  the user's session never knew it was the one meant to relay feedback, bring changes
+  local, merge and pull, and ran orchestrator-style sweeps instead. Now:
+  - **`/crew:session` is the conductor** (the user's session). It opens with a role check:
+    with no `.claude-bootstrap.md` in the working directory it is the conductor and acts as
+    one. New subcommands: `status`, `launch`, `relay`, `local`, `merge`, `done`.
+  - **`/crew:orchestrate`** (poll, monitor, verify) and **`/crew:review`** (one review cycle)
+    are the overseers' skills. Their briefs and `/loop`s call them; their references moved
+    with them.
+- **The orchestrator no longer tears workers down after a merge.** Its brief and its
+  reference told it to run `close-worker.ps1` on merged PRs, contradicting "workers stay
+  alive until the user says done". It now reports `MERGED`; teardown is the conductor's
+  `done`, on the user's word. `pull` lists landed workers and asks, instead of removing them.
+
+### Added
+- **`defaultBranch` is detected** (`"auto"` or absent): from where merged feature PRs actually
+  landed (release PRs such as staging → master ignored), else a `staging`/`develop`/`dev`
+  branch on origin, else origin's default. `session-init` copied GitHub's default branch, which
+  is `master` in a feature → staging → master repo, so worker PRs targeted the wrong branch.
+  A pinned `main`/`master` next to a `staging`/`develop` branch now warns.
+  `status/resolve-config.ps1` prints what was resolved and why.
+- **The conductor watches the terminals.** `status/check-crew-health.ps1` reports every
+  expected window (orchestrator, reviewer, each worker) as `running`, `pending` (unsent text
+  blocking its input box), `exited` (CLI quit to a shell prompt) or `missing`, with a pane hash
+  to spot a stalled loop. `/crew:session launch` starts `/loop 10m /crew:session status`, which
+  restarts dead overseers and asks before resuming workers.
+- **`/crew:session plan <spec>`: a spec, but no issues yet.** The conductor cuts the spec
+  along its own sections into one-worker, one-lane pieces ordered in dependency waves, and
+  **invents nothing**. Every requirement and acceptance criterion comes from the spec, with its
+  section. Where the spec is silent (a field, an endpoint, missing acceptance), it asks an open
+  question, and a piece blocked on one is `needs-decision`. It shows the plan and creates no
+  issues until the user says go, then creates them with `--body-file` and dispatches wave 1.
+  Protocol: `skills/session/reference/commands-plan.md`.
+- **Planned issues carry their spec to the worker.** `psmux-dispatch-issues.ps1` reads
+  `Spec:` / `Work type:` header lines (`Get-IssueBriefHints`). Before, every issue-based worker
+  was briefed as an ITERATION with no spec, so a new piece of a spec would have been told to
+  change existing code only, and never read the spec.
+- **`dispatch/send-to-worker.ps1`**: relays a message as one argument, presses Enter
+  separately, and verifies it was submitted. A bare `psmux send-keys` with separate words
+  lost its spaces and its Enter, leaving `WaitforCIonce1e085andreportback` unsent in a live
+  worker's box.
+
+### Added: the project board
+- **The conductor keeps the GitHub Projects board in step with the build**, through the
+  **GitHub Projects MCP**; issues and PRs stay on the **`gh` CLI**, and `gh project` is never
+  used. New config key `githubProject` (`ownerKind`, `owner`, `number`), printed by
+  `resolve-config.ps1`; `session-init` finds it with the MCP. The conductor is the board's only
+  writer and moves each issue along its Status: **Ready** or **Backlog** when `plan` creates
+  it, **In Progress** on dispatch, **In review** when its PR opens (seen on the `status` tick),
+  then Deployed/Done on merge (see "Changed" above). It never claims verification. It follows the board README's
+  field rules but fills only what the spec or user states; required fields it can't source are
+  left empty and listed. An unavailable connector is reported, never replaced by `gh project`.
+  Protocol: `skills/session/reference/commands-board.md`. Dogfooded read-only against a real
+  board.
+
+### Changed: how the conductor classifies board items (the settled five-field design)
+- **Five fields, five questions**, as settled in dev-lifecycle's `issue-creation.md` §2b:
+  - **Milestone**: when it ships.
+  - **Pillar**: what area. The product's registry, for plumbing and features alike;
+    **Unclassified** while undecided.
+  - **Dependency order**: sequence.
+  - **Phase**: **Foundation** for plumbing, **Develop** for feature-facing work.
+  - **One label**: the kind of change (`bug` / `enhancement` / `refactor` / `discovery` /
+    `chore`, never `feature` or `foundation`).
+- **Status and Deployed are separate.**
+  - Status runs **Todo → In Progress → In review → Done**, with **Blocked** while an item
+    waits on the user (the board's "Needs you" tab). Waiting on another issue stays
+    Backlog.
+  - Deployed records **Staging** when merged to staging, then **Production** alongside
+    Done. **Staging (verified)** is always the user's call.
+- **The conductor classifies by reading each issue; it never copies a label into a field**,
+  and it never sets Work type (being retired, dev-lifecycle #33).
+- **Trackers for big pieces:** plans of five or more pieces get a `[Tracker]` parent issue
+  with real sub-issues (through `gh`) and a board tab filtered to it (through the Projects
+  MCP). This is the RedAI #964 pattern.
+- The issue header that picks the worker brief is now `Mode: feature|iteration`. Older
+  issues that say `Work type:` are still read.
+### Fixed (found by dogfooding a real launch in a sandbox psmux session)
+- **Every window's brief sat unsent.** Launchers typed the brief and pressed Enter once. The
+  first submit after typing is sometimes eaten (Enter and C-m alike), and right after typing
+  the input box can briefly draw empty. On a live launch the orchestrator, reviewer and worker
+  all sat idle with their brief in the box. This is also what the conductor's watchdog found
+  in a real crew (`pending`). New `Send-PaneMessage` waits until the text is visible in the box,
+  submits, and repeats until it leaves. All launchers and `send-to-worker.ps1` use it, and the
+  overseers' briefs tell them to nudge through `send-to-worker.ps1` too.
+- **The orchestrator and reviewer never answered Claude's first-run screens.** They slept 8s
+  and typed blind. On a new folder the brief landed on "Do you trust this folder?" with
+  "No, exit" highlighted. The worker launcher sent "2" + Enter, but the options aren't
+  numbered, so that Enter chose "No, exit" and quit Claude. `Wait-CliReady` (shared by all
+  launchers) now answers by navigation: Down until the wanted option is highlighted, then
+  Enter. It also handles several screens in a row. The health check reports a window stuck on
+  one as `dialog`.
+- **Windows loaded whichever crew copy was installed**, which could be months older than the
+  conductor's and lack the skills their briefs name. Every Claude launch now passes
+  `--plugin-dir` for the copy that launched it (`Get-PluginDirArg`).
+- The health check retries an empty `psmux ls` before calling the session missing, so a
+  momentary blip can't make the watchdog relaunch overseers that are running. It also ignores
+  Claude's idle placeholder hint (`❯ Try "..."`).
+
 ### Fixed
 - **Dispatch no longer dies mid `npm install` under Windows PowerShell 5.1.** Every
   documented invocation used `powershell.exe` (5.1). There, any PowerShell-side redirect

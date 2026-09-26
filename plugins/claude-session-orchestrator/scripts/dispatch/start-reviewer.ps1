@@ -1,4 +1,4 @@
-﻿# start-reviewer.ps1
+# start-reviewer.ps1
 #
 # Spawns a dedicated Reviewer Claude in its own psmux window — the "overseer" that
 # verifies worker PRs one at a time as they go green, so nothing is merged blind.
@@ -6,7 +6,7 @@
 # It has TWO worktrees (both under <worktreesPath>, both project-agnostic):
 #   - HOME      <wt>\reviewer        detached at origin/<defaultBranch>. The Claude's
 #                                    stable cwd: holds .claude-bootstrap.md and the
-#                                    project's .claude/ tree (so /session resolves).
+#                                    project's .claude/ tree (so /crew:review resolves).
 #                                    NEVER checked out, NEVER committed to.
 #   - CHECKOUT  <wt>\review-checkout  where it actually checks out each PR branch,
 #                                    runs the project's tests, and runs /code-review
@@ -17,7 +17,7 @@
 # The reviewer is autonomous (no human watching the pane), so it runs with
 # --dangerously-skip-permissions. Its CONTRACT (no-merge, never touch main, verify
 # in its OWN checkout worktree, one PR at a time, ordered by file-overlap) is
-# enforced by its brief (.claude-bootstrap.md) — see reference/commands-review.md.
+# enforced by its brief (.claude-bootstrap.md) — see skills/review/reference/commands-review.md.
 #
 # Project-agnostic: all paths/session/branch/repo come from session-plugin.json.
 #
@@ -130,7 +130,7 @@ $briefPath = Join-Path $ReviewerHome ".claude-bootstrap.md"
 $brief = @"
 You are the **Reviewer Claude** (the overseer) for the $($cfg.projectName) parallel-build pipeline.
 
-Your cwd is **$ReviewerHome** — a git worktree detached at origin/$DefaultBranch. This is your STABLE HOME: never check out branches here, never commit here. You have the project's .claude/ tree from this checkout, so /session resolves.
+Your cwd is **$ReviewerHome** — a git worktree detached at origin/$DefaultBranch. This is your STABLE HOME: never check out branches here, never commit here. You have the project's .claude/ tree from this checkout, so /crew:review resolves.
 
 Your job: as worker PRs go green, verify them ONE AT A TIME in your dedicated checkout worktree so nothing is ever merged blind. You do NOT merge — you produce an ORDERED, VERIFIED queue and label each PR, then the user merges.
 
@@ -153,7 +153,7 @@ A. The project's tests pass when run against the PR branch in your checkout work
 $testLines
 B. ``/code-review`` against the checked-out PR head (it reviews the changes vs $DefaultBranch) finds no blocking (correctness/security) issues.
 
-REVIEW CYCLE (this is what ``/session review`` does — see reference/commands-review.md for the full protocol):
+REVIEW CYCLE (this is what ``/crew:review`` does — see its reference/commands-review.md for the full protocol):
 1. Compute the batch (above). Consider only PRs with green CI that you have not already marked READY-VERIFIED.
 2. ORDER them: PRs that share no files merge in any order; PRs that touch the same path must be sequenced (verify the lower PR number first). Use ``gh pr view <n> --json files`` to find overlap.
 3. Take the FIRST un-verified PR in that order. In the checkout worktree:
@@ -162,7 +162,7 @@ REVIEW CYCLE (this is what ``/session review`` does — see reference/commands-r
    c. Run ``/code-review`` against the checked-out PR head (reviews changes vs $DefaultBranch; use ``gh pr diff <n>`` for the raw diff if needed).
 4. VERDICT:
    - PASS (tests green AND no blocking findings) -> label/comment the PR ``READY-VERIFIED`` and add it to the ordered queue (note its position and any sequencing dependency).
-   - FAIL -> post the findings as a PR review comment (``gh pr comment <n>`` / ``gh pr review <n> --request-changes``) AND, if the worker window is still live, ``psmux send-keys -t ${Session}:<worker> "<short fix instruction>" Enter``. Do not re-verify until the worker pushes a new commit.
+   - FAIL -> post the findings as a PR review comment (``gh pr comment <n>`` / ``gh pr review <n> --request-changes``) AND, if the worker window is still live, ``pwsh -NoProfile -File "$(Join-Path (Get-PluginRoot) 'scripts\dispatch\send-to-worker.ps1')" -Name <worker> -Message "<short fix instruction>" -Config "$($cfg._configPath)"``. Do not re-verify until the worker pushes a new commit.
 5. Move to the next PR. One PR per pass keeps it sequential and legible.
 6. Report the queue (see OUTPUT).
 
@@ -186,11 +186,11 @@ HARD RULES (do not violate):
 
 FIRST ACTION — run one immediate review cycle now so you have a current picture:
 
-``/session review``
+``/crew:review``
 
 THEN start the recurring loop:
 
-``/loop ${IntervalMin}m /session review``
+``/loop ${IntervalMin}m /crew:review``
 "@
 
 Set-Content -Path $briefPath -Value $brief -Encoding UTF8
@@ -206,18 +206,21 @@ $target = "${Session}:${Window}"
 #    and CLAUDE_CODE_CHILD_SESSION + force persistence, or transcript saving is silently
 #    OFF (same fix as the worker launch in psmux-dispatch.ps1).
 psmux send-keys -t $target '$env:CLAUDECODE=$null; $env:CLAUDE_CODE_ENTRYPOINT=$null; $env:CLAUDE_CODE_CHILD_SESSION=$null; $env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=''1'''
-psmux send-keys -t $target Enter
+psmux send-keys -t $target C-m
 
 # 9. Launch Claude (bare-path launch + standalone Enter, the proven pattern).
-psmux send-keys -t $target "$ClaudeCmd --dangerously-skip-permissions"
-psmux send-keys -t $target Enter
+# Same crew copy as this script, or the window may load an older installed one (Get-PluginDirArg).
+psmux send-keys -t $target "$ClaudeCmd --dangerously-skip-permissions $(Get-PluginDirArg)"
+psmux send-keys -t $target C-m
 
-# 10. Wait for Claude to boot before sending the brief instruction.
-Start-Sleep -Seconds 8
-
+# Wait for Claude to boot, answering its first-run screens (folder trust on a new
+# worktree, the bypass-permissions warning). A blind sleep left the brief typed onto the
+# trust screen, and the window sat there with "No, exit" selected.
+$boot = Wait-CliReady -Target $target -Cli (Get-WorkerCliPreset -Name 'claude')
+if (-not $boot.Ready) { Write-Warning "Claude in $target did not reach its prompt; sending the brief anyway. Check it: psmux capture-pane -t $target -p" }
 # 11. Send the short instruction (relative path — cwd is the home worktree).
-psmux send-keys -t $target "Read .claude-bootstrap.md and follow it exactly."
-psmux send-keys -t $target Enter
+# Type the brief and verify it was submitted (Send-PaneMessage).
+if (-not (Send-PaneMessage -Target $target -Text "Read .claude-bootstrap.md and follow it exactly.")) { Write-Host "WARN: the brief in $target is still unsent - psmux send-keys -t $target C-m" }
 
 Write-Host ""
 Write-Host "[start-reviewer] Launched in $target" -ForegroundColor Green

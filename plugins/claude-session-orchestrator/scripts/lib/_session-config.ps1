@@ -1,4 +1,4 @@
-﻿# _session-config.ps1
+# _session-config.ps1
 #
 # Shared config loader + path helpers for claude-session-orchestrator.
 # Dot-source this from every script:
@@ -84,8 +84,9 @@ function Get-SessionConfig {
         throw "Failed to parse $path as JSON: $($_.Exception.Message)"
     }
 
-    # Required scalar fields
-    $required = @("projectName", "repoPath", "worktreesPath", "psmuxSession", "githubRepo", "defaultBranch", "workerCmdPath", "layout")
+    # Required scalar fields. defaultBranch is NOT required - absent or "auto" means
+    # detect it (see Resolve-IntegrationBranch below).
+    $required = @("projectName", "repoPath", "worktreesPath", "psmuxSession", "githubRepo", "workerCmdPath", "layout")
     foreach ($key in $required) {
         if (-not ($cfg.PSObject.Properties.Name -contains $key) -or $null -eq $cfg.$key) {
             throw "session-plugin.json is missing required field '$key' (config: $path)"
@@ -98,9 +99,138 @@ function Get-SessionConfig {
         throw "session-plugin.json layout.type must be 'root' or 'monorepo-split', got '$($cfg.layout.type)'"
     }
 
+    # Resolve the integration branch every worker branches from and every PR targets.
+    $pinned = if (($cfg.PSObject.Properties.Name -contains "defaultBranch") -and $cfg.defaultBranch) { "$($cfg.defaultBranch)" } else { "" }
+    if (-not $pinned -or $pinned -eq "auto") {
+        $resolved = Resolve-IntegrationBranch -RepoPath $cfg.repoPath -GithubRepo $cfg.githubRepo
+        $cfg | Add-Member -NotePropertyName "defaultBranch" -NotePropertyValue $resolved.Branch -Force
+        $cfg | Add-Member -NotePropertyName "_defaultBranchSource" -NotePropertyValue "detected: $($resolved.Reason)" -Force
+    } else {
+        $cfg | Add-Member -NotePropertyName "_defaultBranchSource" -NotePropertyValue "pinned in config" -Force
+        Test-PinnedBranchSuspicious -Pinned $pinned -RepoPath $cfg.repoPath
+    }
+
     # Stash the resolved config path so callers can report it.
     $cfg | Add-Member -NotePropertyName "_configPath" -NotePropertyValue $path -Force
     return $cfg
+}
+
+# --- Integration branch -------------------------------------------------------
+# GitHub's default branch is often NOT where work lands: a feature -> staging ->
+# master repo has master as its GitHub default, and a config that copied it sent
+# worker PRs straight to master. So the branch is read from what the repo actually
+# does, in this order:
+#   1. The base most recent merged FEATURE PRs targeted (release PRs whose head is
+#      itself a long-lived branch, e.g. staging -> master, are ignored).
+#   2. No PR history: an integration branch that exists on origin (staging, develop, dev).
+#   3. origin's default branch.
+# Pure: takes the facts, returns @{ Branch; Reason }. Resolve-IntegrationBranch
+# gathers the facts.
+function Select-IntegrationBranch {
+    param(
+        [object[]]$MergedPrs = @(),
+        [string[]]$RemoteBranches = @(),
+        [string]$OriginHead
+    )
+    $longLived = @("main", "master", "staging", "develop", "dev", "production", "release")
+    $bases = @($MergedPrs |
+        Where-Object { $_ -and $_.baseRefName -and ($_.headRefName -notin $longLived) } |
+        ForEach-Object { "$($_.baseRefName)" })
+    # A base that no longer exists on origin can't be branched from.
+    if ($RemoteBranches.Count -gt 0) { $bases = @($bases | Where-Object { $_ -in $RemoteBranches }) }
+
+    if ($bases.Count -gt 0) {
+        # Tally in first-seen order (PRs arrive newest first); a strict > keeps the earlier
+        # entry on a tie, so a tie goes to the most recently used base. (Group-Object
+        # sorts by name, which would silently break the tie alphabetically.)
+        $counts = [ordered]@{}
+        foreach ($b in $bases) { $counts[$b] = 1 + [int]$counts[$b] }
+        $topName = $null; $topCount = 0
+        foreach ($k in $counts.Keys) { if ($counts[$k] -gt $topCount) { $topName = $k; $topCount = $counts[$k] } }
+        return [pscustomobject]@{ Branch = $topName; Reason = "$topCount of the last $($bases.Count) merged feature PRs targeted it" }
+    }
+    foreach ($candidate in @("staging", "develop", "dev")) {
+        if ($candidate -in $RemoteBranches) {
+            return [pscustomobject]@{ Branch = $candidate; Reason = "no merged PR history; origin has '$candidate'" }
+        }
+    }
+    if ($OriginHead) { return [pscustomobject]@{ Branch = $OriginHead; Reason = "origin's default branch" } }
+    return [pscustomobject]@{ Branch = "main"; Reason = "nothing detectable; fell back to 'main'" }
+}
+
+function Get-OriginBranchFacts {
+    param([string]$RepoPath)
+    $facts = @{ RemoteBranches = @(); OriginHead = "" }
+    if (-not $RepoPath -or -not (Test-Path (Join-Path $RepoPath ".git"))) { return $facts }
+    $facts.RemoteBranches = @(git -C $RepoPath for-each-ref --format='%(refname:strip=3)' refs/remotes/origin 2>$null |
+        Where-Object { $_ -and $_ -ne "HEAD" })
+    $head = git -C $RepoPath symbolic-ref --short refs/remotes/origin/HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $head) { $facts.OriginHead = ("$head" -replace '^origin/', '').Trim() }
+    return $facts
+}
+
+function Resolve-IntegrationBranch {
+    param([string]$RepoPath, [string]$GithubRepo)
+    if (-not (Test-Path variable:script:IntegrationBranchCache)) { $script:IntegrationBranchCache = @{} }
+    $key = "$RepoPath|$GithubRepo"
+    if ($script:IntegrationBranchCache.ContainsKey($key)) { return $script:IntegrationBranchCache[$key] }
+
+    $facts = Get-OriginBranchFacts -RepoPath $RepoPath
+    $merged = @()
+    if ($GithubRepo -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+        try {
+            $json = gh pr list --repo $GithubRepo --state merged --limit 30 --json baseRefName,headRefName 2>$null
+            if ($LASTEXITCODE -eq 0 -and $json) { $merged = @($json | ConvertFrom-Json) }
+        } catch { $merged = @() }   # offline / not authed: fall through to the branch facts
+    }
+    $result = Select-IntegrationBranch -MergedPrs $merged -RemoteBranches $facts.RemoteBranches -OriginHead $facts.OriginHead
+    $script:IntegrationBranchCache[$key] = $result
+    return $result
+}
+
+# --- Pane health ------------------------------------------------------------------
+# Classify a psmux pane capture for the conductor's health check. Pure (text in,
+# verdict out) so it is testable without psmux.
+#   exited  - the pane's last line is a bare shell prompt: the CLI inside has quit.
+#   dialog  - a first-run screen (folder trust / bypass warning) is waiting for an answer.
+#   pending - the CLI's input box holds typed-but-unsent text, which blocks /loop
+#             prompts and nudges from landing.
+#   running - anything else.
+function Get-PaneState {
+    param([string[]]$Lines)
+    $content = @($Lines | Where-Object { $_ -and $_.Trim() })
+    if ($content.Count -eq 0) { return [pscustomobject]@{ State = "exited"; Detail = "empty pane" } }
+    $last = $content[-1].TrimEnd()
+    if ($last -match '^PS [A-Za-z]:\\[^>]*>\s*$' -or $last -match '^[A-Za-z]:\\[^>]*>\s*$') {
+        return [pscustomobject]@{ State = "exited"; Detail = "shell prompt: the CLI is not running" }
+    }
+    # A first-run screen (folder trust, bypass warning) that nobody answered: the CLI is
+    # up but will never read its brief. Seen live on a freshly launched orchestrator.
+    $tail = @($content | Select-Object -Last 6)
+    $flatTail = ($tail -join '') -replace '\s', ''
+    if ($flatTail -match 'Entertoconfirm|Yes,Itrustthisfolder|Yes,Iaccept') {
+        return [pscustomobject]@{ State = "dialog"; Detail = "stuck on a first-run screen (folder trust / bypass warning)" }
+    }
+    # Claude Code's input line is "❯ <text>" between two rules; look near the bottom only.
+    # An idle Claude shows a greyed placeholder there (❯ Try "how do I log an error?"); that is not input.
+    $inputLine = $tail | Where-Object { $_ -match '^\s*❯\s+\S' -and $_ -notmatch '^\s*❯\s+Try "' } | Select-Object -Last 1
+    if ($inputLine) {
+        return [pscustomobject]@{ State = "pending"; Detail = "unsent input: $($inputLine.Trim())" }
+    }
+    return [pscustomobject]@{ State = "running"; Detail = "" }
+}
+
+# A pinned defaultBranch is honoured, but the common mistake - pinning GitHub's default
+# (main/master) in a repo that has a staging/develop integration branch - is flagged.
+# Local git only, so it costs nothing.
+function Test-PinnedBranchSuspicious {
+    param([string]$Pinned, [string]$RepoPath)
+    if ($Pinned -notin @("main", "master")) { return }
+    $facts = Get-OriginBranchFacts -RepoPath $RepoPath
+    $integration = @("staging", "develop", "dev") | Where-Object { $_ -in $facts.RemoteBranches } | Select-Object -First 1
+    if ($integration) {
+        Write-Warning "session-plugin.json pins defaultBranch '$Pinned', but origin also has '$integration'. If work merges into '$integration' first, set defaultBranch to `"auto`" (or remove it) so it is detected."
+    }
 }
 
 # --- Derived helpers ----------------------------------------------------------
@@ -473,6 +603,150 @@ function Get-CodexCmd {
     throw "Codex CLI not found. Pass -CodexCmd <path>, set config.codexCmdPath, or put 'codex' on PATH (npm i -g @openai/codex)."
 }
 
+# Poll a freshly launched CLI's pane until its REPL is ready, answering its first-run
+# screens on the way. Shared by every launcher (workers, orchestrator, reviewer).
+#
+# Found by dogfooding a real launch: on a new worktree folder Claude first asks "Do you
+# trust this folder?" with "No, exit" highlighted and UNNUMBERED options. The overseer
+# launchers slept 8s and typed their brief onto that screen; the worker launcher sent
+# "2" + Enter, where the "2" is ignored and the Enter picks "No, exit" - Claude quits and
+# the brief is typed into a bare shell. So screens are answered by NAVIGATION, not by
+# digit: a profile's `acceptScreens` names the option to choose, and this presses Down
+# until that option is the highlighted (❯) line, then Enter. Profiles without
+# acceptScreens keep the old acceptMatchAny/acceptSend behaviour.
+#
+# With -DetectResumeFailure, a CLI reporting there is no conversation to resume is
+# returned as ResumeFailed so the caller can relaunch fresh.
+# Returns @{ Ready = $bool; ResumeFailed = $bool }.
+function Wait-CliReady {
+    param([string]$Target, $Cli, [switch]$DetectResumeFailure, [int]$MaxWaitSec = 90)
+    $resumeFailMarkers = @('Noconversationfoundtocontinue', 'Noconversationtoresume', 'Nosessionstoresume', 'Nosessionfound')
+    $screens = if (($Cli.PSObject.Properties.Name -contains 'acceptScreens') -and $Cli.acceptScreens) { @($Cli.acceptScreens) } else { @() }
+    $hasPatterns = ($screens.Count -gt 0) -or ($Cli.acceptMatchAny.Count -gt 0) -or ($Cli.readyMatchAny.Count -gt 0)
+    if (-not $hasPatterns) {
+        Write-Host "[boot] '$($Cli.name)' has no accept/ready patterns - fixed wait $($Cli.bootWaitSec)s"
+        Start-Sleep -Seconds $Cli.bootWaitSec
+        return [pscustomobject]@{ Ready = $true; ResumeFailed = $false }
+    }
+    Write-Host "[boot] Waiting for '$($Cli.name)' in $Target (answering first-run screens)"
+    $keysSent = 0; $lastAnswered = $null
+    $deadline = (Get-Date).AddSeconds($MaxWaitSec)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        $lines = @(psmux capture-pane -t $Target -p 2>$null)
+        $flat  = ($lines -join "`n") -replace '\s', ''
+        if ($DetectResumeFailure) {
+            foreach ($m in $resumeFailMarkers) {
+                if ($flat.Contains($m)) {
+                    Write-Host "[boot] Resume could not attach (no prior conversation)"
+                    return [pscustomobject]@{ Ready = $false; ResumeFailed = $true }
+                }
+            }
+        }
+        # Ready wins: the footer only shows once every first-run screen is gone.
+        foreach ($pat in $Cli.readyMatchAny) {
+            if ($flat.Contains($pat)) {
+                Write-Host "[boot] Ready"
+                return [pscustomobject]@{ Ready = $true; ResumeFailed = $false }
+            }
+        }
+        if ($keysSent -ge 12) { continue }   # never flail: stop pressing keys, just wait
+
+        # Navigate-and-choose screens.
+        $screen = $screens | Where-Object { $flat.Contains($_.match) } | Select-Object -First 1
+        if ($screen) {
+            $selected = $lines | Where-Object { $_ -match '❯' } | Select-Object -Last 1
+            $selectedFlat = "$selected" -replace '\s', ''
+            if ($selectedFlat.Contains($screen.choose)) {
+                Write-Host "[boot] First-run screen: choosing '$($screen.choose)'"
+                psmux send-keys -t $Target Enter
+            } else {
+                psmux send-keys -t $Target Down
+            }
+            $keysSent++
+            continue
+        }
+
+        # Legacy: send a fixed answer to a matching screen, once per distinct screen.
+        $hit = $Cli.acceptMatchAny | Where-Object { $flat.Contains($_) } | Select-Object -First 1
+        $screenKey = if ($hit) { $flat.Substring([Math]::Max(0, $flat.Length - 400)) } else { $null }
+        if ($hit -and $Cli.acceptSend -and $screenKey -ne $lastAnswered) {
+            Write-Host "[boot] First-run screen ('$hit') - sending '$($Cli.acceptSend)'"
+            psmux send-keys -t $Target $Cli.acceptSend Enter
+            $keysSent++; $lastAnswered = $screenKey
+        }
+    }
+    Write-Host "[boot] WARN: '$($Cli.name)' in $Target did not show its ready prompt within ${MaxWaitSec}s"
+    return [pscustomobject]@{ Ready = $false; ResumeFailed = $false }
+}
+
+# Type a message into a CLI's input box and make sure it is SUBMITTED. Every launcher and
+# send-to-worker.ps1 use this; nothing else should type-and-press-Enter into a Claude pane.
+#
+# Built from a live launch, where every window's brief sat unsent in its input box:
+#   - The first submit keypress after typing is sometimes eaten (Enter and C-m alike),
+#     notably early in a session. A second one goes through. So: retry.
+#   - Right after typing, the box can briefly draw EMPTY before the text renders. "The box
+#     is empty" therefore proves nothing until the text has been SEEN in it. So: wait for
+#     the text to show up, then submit, then require it to be gone from the box.
+# The box is the region between the last two horizontal rules Claude draws. For a CLI that
+# draws no such box, we fall back to Test-InputSubmitted's busy/empty heuristics.
+# Returns $true once submitted, $false if still unsent after MaxWaitSec.
+function Send-PaneMessage {
+    param([Parameter(Mandatory)][string]$Target, [Parameter(Mandatory)][string]$Text, [int]$MaxWaitSec = 60)
+    $line = ($Text -replace '\r?\n', ' ').Trim()   # a newline would submit half the message
+    $probe = ($line -replace '\s', '')
+    $probe = $probe.Substring(0, [Math]::Min(15, $probe.Length))
+    psmux send-keys -t $Target $line
+
+    # 1. Wait until the text is visibly in the box (or the CLI draws no box we can read).
+    $deadline = (Get-Date).AddSeconds([Math]::Min(20, $MaxWaitSec))
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 1
+        $box = Get-InputBoxText -Lines @(psmux capture-pane -t $Target -p -S -60 2>$null)
+        if ($null -eq $box -or $box.Contains($probe)) { break }
+    }
+
+    # 2. Submit until the text has left the box (or the CLI is visibly busy).
+    $deadline = (Get-Date).AddSeconds($MaxWaitSec)
+    do {
+        psmux send-keys -t $Target C-m
+        Start-Sleep -Seconds 3
+        $lines = @(psmux capture-pane -t $Target -p -S -60 2>$null)
+        $box = Get-InputBoxText -Lines $lines
+        if ($null -ne $box) {
+            if (-not $box.Contains($probe)) { return $true }
+        } elseif (Test-InputSubmitted -Lines $lines) { return $true }
+    } while ((Get-Date) -lt $deadline)
+    Write-Host "[send] WARN: message in $Target still unsubmitted after ${MaxWaitSec}s"
+    return $false
+}
+
+# The text in Claude's input box: the lines between the last two full-width rules, with
+# whitespace and the "❯" prompt removed. $null when no such box is visible.
+function Get-InputBoxText {
+    param([string[]]$Lines)
+    $rules = @()
+    for ($i = 0; $i -lt $Lines.Count; $i++) { if ($Lines[$i] -match '^\s*─{20,}\s*$') { $rules += $i } }
+    if ($rules.Count -lt 2) { return $null }
+    $a = $rules[-2]; $b = $rules[-1]
+    $inner = if ($b - $a -gt 1) { $Lines[($a + 1)..($b - 1)] } else { @() }
+    $flat = (($inner -join '') -replace '\s', '') -replace '^❯', ''
+    if ($flat -match '^Try"') { return "" }   # the idle placeholder hint is not input
+    return $flat
+}
+
+# Fallback evidence for a CLI without a readable input box: it is busy ("esc to
+# interrupt"), or its prompt line is visible and empty.
+function Test-InputSubmitted {
+    param([string[]]$Lines)
+    $tail = @($Lines | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 6)
+    if ((($tail -join '') -replace '\s', '') -match 'esctointerrupt') { return $true }
+    foreach ($l in $tail) {
+        if ($l -match '^\s*❯\s*$' -or $l -match '^\s*❯\s+Try "') { return $true }
+    }
+    return $false
+}
 # --- Worker-CLI profiles ------------------------------------------------------
 # The worker dispatch is data-driven: a profile tells psmux-dispatch how to launch
 # the agent CLI in the pane and how to detect that it is ready.
@@ -485,6 +759,8 @@ function Get-CodexCmd {
 #                    Claude needs CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1 or the
 #                    worker writes NO transcript, which makes `restore` unable to
 #                    `claude --continue` it after a crash/reboot.
+#   acceptScreens  : first-run screens answered by navigation: @{ match; choose } -
+#                    Down until the highlighted line contains 'choose', then Enter
 #   acceptMatchAny : substrings that signal a first-run accept screen (matched
 #                    against the pane text with ALL whitespace removed)
 #   acceptSend     : key/string to send when an accept pattern matches
@@ -495,6 +771,21 @@ function Get-CodexCmd {
 # fixed-wait launch with no accept handshake. For other CLIs (Gemini/Qwen/…), supply
 # a custom object in config.workerCli with that CLI's REAL patterns — we do not ship
 # unverified prompt strings.
+# The root of THIS copy of the plugin (the folder holding .claude-plugin\plugin.json).
+# $PSScriptRoot inside a function is the dir of the file that defines it: this lib.
+function Get-PluginRoot {
+    return (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+}
+
+# Every Claude window these scripts launch (orchestrator, reviewer, workers) gets
+# --plugin-dir pointing at the copy of crew that launched it. Without it a window loads
+# whatever copy is INSTALLED - which can be months older than the conductor's (the
+# marketplace entry is a local directory that never fetches) - so its brief names skills
+# (/crew:orchestrate, /crew:review) that its plugin doesn't have.
+function Get-PluginDirArg {
+    return "--plugin-dir `"$(Get-PluginRoot)`""
+}
+
 function Get-WorkerCliPreset {
     param([string]$Name)
     switch ($Name) {
@@ -507,7 +798,13 @@ function Get-WorkerCliPreset {
                 # the worker cannot be resumed with `claude --continue` later.
                 clearEnv = @('CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION')
                 setEnv = @{ CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1' }
-                acceptMatchAny = @('Yes,Iaccept', 'No,exit'); acceptSend = '2'
+                # Answered by navigation (see Wait-CliReady): folder trust on a new
+                # worktree, then the bypass-permissions warning. Verified on a live boot.
+                acceptScreens = @(
+                    [pscustomobject]@{ match = 'Itrustthisfolder'; choose = 'Yes,Itrustthisfolder' },
+                    [pscustomobject]@{ match = 'Yes,Iaccept';      choose = 'Yes,Iaccept' }
+                )
+                acceptMatchAny = @(); acceptSend = $null
                 readyMatchAny = @('bypasspermissionson'); bootWaitSec = 12
             }
         }

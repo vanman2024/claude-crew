@@ -58,7 +58,7 @@ A worktree exists independently of psmux — psmux just runs a shell inside it.
 
 ### Per-task dispatch — the plugin does this for you
 
-`/session start <name>` (or `/session start-issues <n>...` for a GitHub issue
+`/crew:session start <name>` (or `/crew:session start-issues <n>...` for a GitHub issue
 backlog) runs `dispatch/psmux-dispatch.ps1`, which performs every step below in
 one shot:
 
@@ -93,16 +93,16 @@ the flag for the main/orchestrator session or anything without a PR review step.
 - Detach anytime: `Ctrl+B + d` — sessions keep running.
 
 ### The orchestrator's role (autonomous, via `/loop`)
-Launch it with `dispatch/start-orchestrator.ps1`. From its own detached worktree
-window it runs `/session orchestrate poll` every N minutes:
+The conductor launches it (`/crew:session launch`, i.e. `dispatch/start-orchestrator.ps1`).
+From its own detached worktree window it runs `/crew:orchestrate poll` every N minutes:
 
 1. `psmux capture-pane` on each worker pane; read the last ~25 lines.
 2. Detect state — **working** (no action), **waiting for input** (answer it),
    **stuck** (nudge), **errored** (report/correct), **done** (PR opened → flag
    `READY FOR USER REVIEW`, stop polling that worker).
-3. Send nudges via `psmux send-keys -t <sess>:<name> "<msg>" Enter`.
+3. Send nudges via `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "<msg>" -Config "<repo>/.claude/session-plugin.json"`.
 4. Flag green, mergeable PRs in the batch as ready. **It never merges.**
-5. After **you** merge a PR, it tears that worker down with `close-worker.ps1`.
+5. After **you** merge a PR, it reports it `MERGED`. The worker stays alive until you say it is done.
 6. Self-terminates when no live workers and no open batch PRs remain.
 
 `/loop` is the cron — there are no Windows scheduled tasks or PowerShell sleep loops.
@@ -133,23 +133,24 @@ workers keep editing files (they edit freely without running the backend).
 
 ### Per worker
 When a worker opens its PR (`gh pr create ... --base <base> ... Closes #N`) it
-goes quiet. Your turn:
-1. Review the preview / diff.
-2. Give feedback in its pane (type; it reads and iterates).
-3. Iterate until it's right; confirm CI is green.
-4. **Merge** — you authorize it ("merge it"); the orchestrator never merges.
+goes quiet. You work it through the conductor (your own session):
+1. Review it: the Vercel preview, or `/crew:session local <name>` to run it on your machine.
+2. Tell the conductor what's wrong; it relays it into the worker's pane (`relay`).
+3. Iterate until it's right; confirm CI is green (and `READY-VERIFIED`, if the reviewer runs).
+4. **"Merge it"**: the conductor merges into `<base>` and offers to `pull` it into your checkout.
 
-### Cleanup after merge — junction-first
+### Teardown, when you say a worker is done — junction-first
 
-Always tear down with the plugin script (it detaches the `node_modules`
-junction(s) BEFORE removing the worktree, so the main checkout isn't gutted):
+Workers stay alive after merge. When you're done with one, the conductor's `done <name>`
+runs the plugin script (it detaches the `node_modules` junction(s) BEFORE removing the
+worktree, so the main checkout isn't gutted):
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/teardown/close-worker.ps1" -Name <name> -Config "<repo>\.claude\session-plugin.json"
 ```
 
 The session and other worktree windows keep going. Pattern: spin up windows,
-work, merge, tear down, repeat.
+work, merge, keep iterating or tear down, repeat.
 
 ### Done for the day
 ```powershell
@@ -200,7 +201,7 @@ Ctrl+B + z                # zoom pane
 
 # Orchestration (capture + steer — no focus theft)
 psmux capture-pane -t <sess>:<name> -p
-psmux send-keys -t <sess>:<name> "msg" Enter
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "msg" -Config "<repo>/.claude/session-plugin.json"
 
 # Cleanup
 # (prefer close-worker.ps1 for worktree teardown — junction-first)

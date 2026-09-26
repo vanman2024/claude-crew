@@ -8,12 +8,23 @@
   "workerCmdPath": "C:\\Users\\angel\\AppData\\Roaming\\npm\\claude.cmd",
   "workerCli": "claude",
   "worktreeDeps": "install",
-  "devServer": { "port": 3000, "dir": "." },
+  "devServer": {
+    "port": 3000,
+    "dir": "."
+  },
   "layout": {
     "type": "root",
-    "envFiles": [".env", ".env.local", ".env.test"],
+    "envFiles": [
+      ".env",
+      ".env.local",
+      ".env.test"
+    ],
     "nodeModules": "node_modules",
     "testCmd": "npx tsc --noEmit && pnpm test"
+  },
+  "githubProject": {
+    "ownerKind": "USER",
+    "owner": "your-github-login",
+    "number": 1
   }
 }
-
