@@ -52,8 +52,9 @@ is stuck with unsent input. That is `status`, on a slow `/loop` for as long as a
 
 **GitHub:** issues and PRs go through the **`gh` CLI**. The **project board** goes through the
 **GitHub Projects MCP** (`mcp__claude_ai_GitProjects__*`), never `gh project`. You are the
-board's only writer: each step above moves its issues along the board's Status (Ready →
-In Progress → In review → Staging/Done). How, and which fields you may fill:
+board's only writer: each step above moves its issues along the board (Status Todo →
+In Progress → In review → Done, Blocked while waiting on the user, and Deployed Staging →
+Production as merges land). How, and which fields you may fill:
 [reference/commands-board.md](reference/commands-board.md).
 
 Steps 3 to 5 repeat per PR. Act on these without the user spelling out the mechanics: "merge
@@ -177,8 +178,8 @@ write issues that say more than the spec does. Full protocol:
 4. Show the plan table + open questions. **Create nothing until the user says go.**
 5. Create issues with `gh issue create --body-file`, headed by `Spec:` / `Mode:` lines. The
    dispatcher reads them, so the worker is briefed to build that spec as a feature, not to tweak
-   existing code. **Put each one on the project board** (Ready for wave 1, Backlog for later
-   waves and `needs-decision`), filling only fields the spec or user states.
+   existing code. **Put each one on the project board** (Todo for wave 1, Backlog for later
+   waves, Blocked for `needs-decision`), filling only fields the spec or user states.
 6. `start-issues` for wave 1 only, then `launch`. Later waves on the user's word, once their
    dependencies merge.
 
@@ -300,8 +301,9 @@ Never merge before the user has reviewed, and never merge on your own initiative
    have the next one's worker rebase onto `<base>` (`relay`), re-verify, merge, repeat.
    Re-check `mergeable` after every merge.
 4. **Squash-merge**: `gh pr merge <n> --repo <gh> --squash`. One commit per feature.
-5. **Move the issue on the board**: **Staging** when `<base>` is a staging branch, **Done** when it
-   is the production branch. Never **Verified**: that is the user's call.
+5. **Move the issue on the board**: into a staging `<base>` → **Deployed: Staging** (Status stays
+   In review); into production → **Status: Done, Deployed: Production**. Never **Staging
+   (verified)**: that is the user's call.
 6. **Offer `pull`** so the user has the merged work locally.
 7. **Leave the worker running.** The user may iterate on it or give it more work. Teardown is
    `done`, on the user's word only.

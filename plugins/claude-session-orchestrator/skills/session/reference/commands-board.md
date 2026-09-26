@@ -35,7 +35,7 @@ Read the board's **README** from `project_get`. It states that board's own rules
 which fields every item must carry. Follow them.
 
 Keep the ids you need: the `Status` field and its option ids, plus any other single-select
-fields you will set (`Module`, `Phase`, `Priority`). Option ids differ between boards even
+fields you will set (`Status`, `Deployed`, `Pillar`, `Phase`). Option ids differ between boards even
 when the names match, so never reuse ids from another board.
 
 ## Putting an issue on the board, or finding its item
@@ -52,42 +52,50 @@ request, use `github_resolve_pull_request`.
 To change fields on an item you already have: `project_update_item_field` (one item), or
 `project_bulk_update_items` (the same value on up to 25 items, e.g. moving a whole wave).
 
-## Status: what the build does to the board
+## Status and Deployed: what the build does to the board
 
-Map by the option **name** on this board. Boards in this family use
-`Backlog / Todo / Ready / In Progress / In review / Staging / Verified / Done`.
+Two fields, two questions. **Status** is where the work is. **Deployed** is which environment it
+has reached (`None / Staging / Staging (verified) / Production`). A merge to staging changes
+Deployed, not Status. Map by option **name**, and only to an option that exists on this board.
 
-| Build event | Status | Who notices |
-|---|---|---|
-| `plan` creates a wave-1 issue with no open questions | **Ready** | conductor, when creating it |
-| `plan` creates a later-wave or `needs-decision` issue | **Backlog** | conductor, when creating it |
-| A worker is dispatched on the issue (`start-issues`, `start`) | **In Progress** | conductor, right after dispatch |
-| The worker opens its PR | **In review** | conductor's `status` tick (sees the PR via `gh pr list`) |
-| The PR merges into `<base>` and `<base>` is a staging branch (`staging`, `develop`, `dev`) | **Staging** | conductor, right after `merge` |
-| The PR merges into `<base>` and `<base>` is the production branch (`main`/`master`) | **Done** | conductor, right after `merge` |
-| Verified on staging / promoted | **Verified** / **Done** | the user says so; the crew never claims verification |
+| Build event | Status | Deployed | Who notices |
+|---|---|---|---|
+| `plan` creates a wave-1 issue with no open questions | **Todo** (scheduled and unblocked) | | conductor, when creating it |
+| `plan` creates a later-wave issue | **Backlog** | | conductor, when creating it |
+| An issue waits on the **user**: `needs-decision`, a config change, an approval | **Blocked**. It shows on the board's "Needs you" tab | | conductor, when it happens |
+| A worker is dispatched on the issue (`start-issues`, `start`) | **In Progress** | | conductor, right after dispatch |
+| The worker opens its PR | **In review** | | conductor's `status` tick (sees the PR via `gh pr list`) |
+| The PR merges into a staging `<base>` (`staging`, `develop`, `dev`) | stays **In review** | **Staging** | conductor, right after `merge` |
+| The user checks it on staging | | **Staging (verified)** | the user says so; the crew never claims verification |
+| It reaches production (merged into, or promoted to, `main`/`master`) | **Done** | **Production** | conductor, right after the merge or promotion |
 
-Only move an item forward along that list, and only to an option that exists on this board.
-If the board lacks an option (e.g. no `Staging`), use the next one that exists and say so.
-Never move an item backwards unless the user asks.
+**Blocked means waiting on a person**, not on another issue. Work waiting on an unmerged
+dependency stays **Backlog** (the native blocked-by link says why). When the user answers,
+move the item back to **Todo**.
+
+**Older boards** without these options: `Ready` stands in for Todo; with no Deployed field, a
+`Staging` Status option records the staging merge. Otherwise use the next option that exists and
+say so. Never move an item backwards unless the user asks.
 
 ## Classifying an item: you read it, you decide; nothing is copied
 
 Scripts build a board's structure. **You** classify the items, by reading each one. Never copy a
-label into a field: that is how a board ended up saying everything twice (see dev-lifecycle's
-`catalog/github-project.yaml`, CLASSIFICATION).
+label into a field: that is how a board ended up saying everything twice (dev-lifecycle
+`catalog/github-project.yaml` CLASSIFICATION, and `references/issue-creation.md` §2b, "five
+fields, five questions").
 
-| Field | What you set |
-|---|---|
-| **Module** | One value from the board's fixed list. **Feature work**: the product module it serves (the product's module registry). **Plumbing**: the `Platform — …` area of the architecture plane it builds (Surfaces & Routing, Trust & Contracts, Work & Correctness, Integrations, Operations, AI). Which list the value comes from *is* feature vs plumbing. Nothing fits → leave it empty and say so; never add an option |
-| **Work type** | **Don't.** The kind of change lives on the label only (`bug`, `enhancement`, `refactor`, `chore`, `discovery`). If a board still has a Work type field, leave it alone; it's being retired |
-| `Phase` | `Develop` for build work dispatched to workers, if the board has Phase |
-| `Dependency order` | the plan's wave number, if the board has this field |
-| Priority, dates, Release slice, Product | only when the spec, the issue or the user states it. Otherwise **leave empty** and list it as "to fill" |
+| Field | Answers | What you set |
+|---|---|---|
+| **Pillar** | what area | One value from the board's fixed list: the product's pillar registry. It applies to plumbing and feature work **alike**. Nothing fits → **Unclassified** and say so; never add an option |
+| **Phase** | plumbing or feature-facing | **Foundation** for plumbing: platform work nobody asked for directly, which unblocks something else. **Develop** for feature-facing work |
+| **Dependency order** | sequence | the plan's wave, or the capability `depends_on` order, if the board has the field |
+| **Capability** | which platform capability | `Sxx - …` only when the plan or issue names it, if the board has the field |
+| **label** | kind of change | exactly one of `bug` / `enhancement` / `refactor` / `discovery` / `chore`, set on the issue with `gh issue edit --add-label`. Never `feature`, never `foundation` |
+| **Work type** | | **Don't.** It duplicated the label and is being retired; if a board still has it, leave it alone |
+| Priority, dates, Release slice, Product | | only when the spec, the issue or the user states it. Otherwise **leave empty** and list it as "to fill" |
 
-Never guess a priority, a date or a module to satisfy a board rule. An empty field the user can
+Never guess a priority, a date or a pillar to satisfy a board rule. An empty field the user can
 see is better than a plausible wrong one.
-
 ## Trackers: how a large piece is organized and seen
 
 All work lives on the one board. A **large** piece (a spec that splits into several issues, an
@@ -104,7 +112,7 @@ audit, a release push) gets a tracker. A small one doesn't: a tab for every epic
    `project_create_view` (name: the tracker's subject, layout `BOARD_LAYOUT`), then
    `project_update_view` with `filter_text: "parent-issue:<owner>/<repo>#<tracker#>"`.
 
-The tracker itself goes on the board too, in the same Module as its pieces.
+The tracker itself goes on the board too, in the same Pillar as its pieces.
 
 ## Reading the board for `status`
 

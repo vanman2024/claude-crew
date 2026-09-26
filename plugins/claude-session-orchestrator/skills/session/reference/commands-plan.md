@@ -119,9 +119,10 @@ Part of #<epic>
   make each piece a real **sub-issue** of it, and give it its own board tab filtered to it
   (see [commands-board.md](commands-board.md), "Trackers"). Smaller plans skip the tracker.
 - **Put every issue on the project board** as you create it (GitHub Projects MCP, never
-  `gh project`; see [commands-board.md](commands-board.md)): Status **Ready** for wave 1 with no
-  blocking question, **Backlog** for later waves and `needs-decision`. Set **Module** by reading
-  the piece (a product module for feature work, a `Platform — …` area for plumbing) and
+  `gh project`; see [commands-board.md](commands-board.md)): Status **Todo** for wave 1 with no
+  blocking question, **Backlog** for later waves, **Blocked** for `needs-decision` (it waits on the
+  user). Set **Pillar** by reading the piece (the product's pillar registry, for plumbing and
+  features alike), **Phase** (Foundation for plumbing, Develop for feature-facing work), and
   `Dependency order` from the wave if the board has it. Never set Work type: the kind of change
   is the label. Fields the spec doesn't state (priority, dates, release slice) stay **empty**.
   List them in your summary as "to fill".

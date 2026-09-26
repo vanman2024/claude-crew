@@ -56,28 +56,34 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `resolve-config.ps1`; `session-init` finds it with the MCP. The conductor is the board's only
   writer and moves each issue along its Status: **Ready** or **Backlog** when `plan` creates
   it, **In Progress** on dispatch, **In review** when its PR opens (seen on the `status` tick),
-  **Staging** or **Done** on merge. It never claims **Verified**. It follows the board README's
+  then Deployed/Done on merge (see "Changed" above). It never claims verification. It follows the board README's
   field rules but fills only what the spec or user states; required fields it can't source are
   left empty and listed. An unavailable connector is reported, never replaced by `gh project`.
   Protocol: `skills/session/reference/commands-board.md`. Dogfooded read-only against a real
   board.
 
-### Changed: how the conductor classifies board items
-- **The conductor classifies by reading; it never copies a label into a field.** It
-  never sets **Work type**: the kind of change lives on the label only. The field is
-  being retired (dev-lifecycle #33).
-- **Module is the one classification field.** Feature work takes the product module it
-  serves; plumbing takes a `Platform — …` area, one per architecture-kernel plane (Surfaces
-  & Routing, Trust & Contracts, Work & Correctness, Integrations, Operations, AI). If
-  nothing fits, it stays empty and gets flagged; no new option is ever added.
-- **Trackers for big pieces.** A plan of five or more pieces gets a `[Tracker]` parent
-  issue, each piece becomes a real sub-issue of it (through `gh`, via the REST
-  `sub_issues` endpoint), and the tracker gets its own board tab filtered to
-  `parent-issue:<owner>/<repo>#<n>` (through the Projects MCP). This is the RedAI #964
-  pattern.
+### Changed: how the conductor classifies board items (the settled five-field design)
+- **Five fields, five questions**, as settled in dev-lifecycle's `issue-creation.md` §2b:
+  - **Milestone**: when it ships.
+  - **Pillar**: what area. The product's registry, for plumbing and features alike;
+    **Unclassified** while undecided.
+  - **Dependency order**: sequence.
+  - **Phase**: **Foundation** for plumbing, **Develop** for feature-facing work.
+  - **One label**: the kind of change (`bug` / `enhancement` / `refactor` / `discovery` /
+    `chore`, never `feature` or `foundation`).
+- **Status and Deployed are separate.**
+  - Status runs **Todo → In Progress → In review → Done**, with **Blocked** while an item
+    waits on the user (the board's "Needs you" tab). Waiting on another issue stays
+    Backlog.
+  - Deployed records **Staging** when merged to staging, then **Production** alongside
+    Done. **Staging (verified)** is always the user's call.
+- **The conductor classifies by reading each issue; it never copies a label into a field**,
+  and it never sets Work type (being retired, dev-lifecycle #33).
+- **Trackers for big pieces:** plans of five or more pieces get a `[Tracker]` parent issue
+  with real sub-issues (through `gh`) and a board tab filtered to it (through the Projects
+  MCP). This is the RedAI #964 pattern.
 - The issue header that picks the worker brief is now `Mode: feature|iteration`. Older
   issues that say `Work type:` are still read.
-
 ### Fixed (found by dogfooding a real launch in a sandbox psmux session)
 - **Every window's brief sat unsent.** Launchers typed the brief and pressed Enter once. The
   first submit after typing is sometimes eaten (Enter and C-m alike), and right after typing

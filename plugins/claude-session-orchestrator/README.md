@@ -291,9 +291,13 @@ resolved with `scripts/status/resolve-config.ps1`.
 Issues and PRs go through the `gh` CLI; the project board goes through the **GitHub Projects
 MCP**, never `gh project`. Set `"githubProject": { "ownerKind": "USER", "owner": "<login>",
 "number": <n> }` in the config. The conductor is the board's only writer and moves each issue
-along its Status as the build does: **Ready** when planned, **In Progress** when a worker
-starts, **In review** when its PR opens, **Staging** or **Done** when merged. It fills only
-fields the spec or you state; required fields it can't source are left empty and listed.
+along the board as the build does: **Todo** when planned (**Blocked** while it waits on you),
+**In Progress** when a worker starts, **In review** when its PR opens, **Deployed: Staging**
+when merged to staging, **Done / Production** when it reaches production. It classifies by
+reading each issue: **Pillar** (the product's area, plumbing or feature), **Phase**
+(Foundation = plumbing, Develop = feature-facing), one kind **label**, never Work type. It
+fills only fields the spec or you state; required fields it can't source are left empty and
+listed.
 Protocol: `skills/session/reference/commands-board.md`.
 
 ### The orchestrator

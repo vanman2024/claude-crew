@@ -585,13 +585,23 @@ Describe "GitHub: gh for issues/PRs, the GitHub Projects MCP for the board" {
         $script:Conductor | Should -Match 'allowed-tools:.*mcp__claude_ai_GitProjects__project_update_item_field'
     }
 
-    It "the build moves items along Status: <_>" -ForEach @('Ready', 'In Progress', 'In review', 'Staging', 'Done') {
+    It "the build moves items along Status: <_>" -ForEach @('Todo', 'Backlog', 'Blocked', 'In Progress', 'In review', 'Done') {
         $script:Board | Should -Match "\*\*$_\*\*"
     }
 
-    It "the crew never claims Verified, and never invents field values" {
+    It "the environment is Deployed, not Status (Staging, then Production)" {
+        $script:Board | Should -Match '\*\*Deployed\*\*'
+        $script:Board | Should -Match 'stays \*\*In review\*\* \| \*\*Staging\*\*'
+        $script:Board | Should -Match '\*\*Done\*\* \| \*\*Production\*\*'
+    }
+
+    It "Blocked means waiting on a person, not on another issue" {
+        $script:Board | Should -Match 'Blocked means waiting on a person'
+    }
+
+    It "the crew never claims verification, and never invents field values" {
         $script:Board | Should -Match 'the crew never claims verification'
-        $script:Board | Should -Match 'Never guess a priority, a date or a module'
+        $script:Board | Should -Match 'Never guess a priority, a date or a pillar'
     }
 
     It "an unavailable connector is reported, not silently skipped or replaced by gh project" {
@@ -612,14 +622,18 @@ Describe "Board taxonomy: AI classifies, Module is the one field, trackers for b
         $script:Plan  = Get-Content (Join-Path $PSScriptRoot "..\skills\session\reference\commands-plan.md") -Raw
     }
 
-    It "the conductor never sets Work type; the kind of change is the label" {
-        $script:Board | Should -Match '\*\*Work type\*\* \| \*\*Don''t\.\*\*'
+    It "the conductor never sets Work type; the kind of change is one label" {
+        $script:Board | Should -Match '\*\*Work type\*\* \| \| \*\*Don''t\.\*\*'
+        $script:Board | Should -Match 'Never `feature`, never `foundation`'
         $script:Plan  | Should -Match 'Never set Work type'
     }
 
-    It "Module separates feature work (product module) from plumbing (Platform area)" {
-        $script:Board | Should -Match 'Feature work'
-        $script:Board | Should -Match '`Platform — …` area'
+    It "Pillar is the area for plumbing and features alike; Phase says which" {
+        $script:Board | Should -Match '\*\*Pillar\*\* \| what area'
+        $script:Board | Should -Match 'plumbing and feature work \*\*alike\*\*'
+        $script:Board | Should -Match '\*\*Foundation\*\* for plumbing'
+        $script:Board | Should -Not -Match 'Platform —'
+        $script:Board | Should -Not -Match '\*\*Module\*\*'
     }
 
     It "never copies a label into a field" {
