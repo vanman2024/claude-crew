@@ -22,6 +22,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
   `done`, on the user's word. `pull` lists landed workers and asks, instead of removing them.
 
 ### Added
+- **A cloud lane: `/crew:session-cloud`, `/crew:orchestrate-cloud`, `/crew:review-cloud`.**
+  Same four-role governance as `/crew:session` (no-auto-merge, only the conductor merges,
+  only on the user's word) but workers, orchestrator and reviewer are all native
+  `claude --cloud` sessions instead of psmux windows over local worktrees — no laptop
+  required to stay open, no per-worker terminal overhead. Independent of the psmux lane; a
+  project can run both at once for different batches. New bookkeeping: a per-batch
+  `.claude/crew-cloud/<batch>.json` file (the only state this lane keeps, since there are no
+  worktrees or psmux windows to enumerate workers from) replaces `check-crew-health.ps1`'s
+  pane-scraping with `gh pr list`/`gh pr view` polling, and `send-to-worker.ps1`'s keystroke
+  injection with the documented `claude -p "<msg>" --cloud <session-id>` follow-up command.
+  No new scripts: dispatch and relay are plain `claude` CLI calls the conductor runs
+  directly.
 - **`defaultBranch` is detected** (`"auto"` or absent): from where merged feature PRs actually
   landed (release PRs such as staging → master ignored), else a `staging`/`develop`/`dev`
   branch on origin, else origin's default. `session-init` copied GitHub's default branch, which

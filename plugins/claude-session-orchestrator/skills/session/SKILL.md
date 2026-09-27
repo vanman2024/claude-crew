@@ -421,3 +421,8 @@ branch, `local` is the usual entry point.
 - the whole start-to-finish workflow: [reference/psmux-workflow.md](reference/psmux-workflow.md)
 - what the orchestrator does: `/crew:orchestrate` ([its reference](../orchestrate/reference/commands-orchestrate.md))
 - what the reviewer does: `/crew:review` ([its reference](../review/reference/commands-review.md))
+- **a cloud lane exists**: `/crew:session-cloud` runs this same four-role governance with
+  `claude --cloud` sessions instead of psmux windows — no local worktrees for workers, no
+  laptop required to stay open. Same config, same board rules, independent of this lane;
+  use it for a wide batch (tens of workers) or when the user wants to walk away entirely.
+  See [../session-cloud/SKILL.md](../session-cloud/SKILL.md).
