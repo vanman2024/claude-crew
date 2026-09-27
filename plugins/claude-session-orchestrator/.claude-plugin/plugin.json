@@ -1,10 +1,10 @@
 {
   "name": "crew",
-  "description": "Project-agnostic parallel-worktree build pipeline for Windows. Spawns Claude workers in psmux windows across git worktrees, orchestrates them via Claude Code's native /loop with a no-auto-merge contract, and tears them down junction-first. Driven entirely by a per-project .claude/session-plugin.json config.",
+  "description": "Project-agnostic parallel-build pipeline. Spawns Claude workers either in psmux windows across git worktrees (Windows) or as native `claude --cloud` sessions, orchestrates them via Claude Code's native /loop with a no-auto-merge contract, and tears them down junction-first (psmux lane) or archives them (cloud lane). Driven entirely by a per-project .claude/session-plugin.json config.",
   "author": {
     "name": "vanman2024",
     "email": "angelryan17@outlook.com"
   },
-  "keywords": ["worktree", "psmux", "orchestrator", "parallel", "windows", "build-pipeline", "claude-code"],
+  "keywords": ["worktree", "psmux", "orchestrator", "parallel", "windows", "cloud", "build-pipeline", "claude-code"],
   "license": "MIT"
 }
