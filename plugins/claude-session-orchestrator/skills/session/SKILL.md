@@ -1,7 +1,7 @@
 ---
 name: session
-description: The CONDUCTOR role in a crew build - the user's own session. Dispatches parallel git-worktree workers in psmux, launches the orchestrator and reviewer, relays the user's feedback into worker windows, brings workers' changes onto the user's machine to look at, merges on the user's go-ahead into the detected integration branch, pulls merged work into the local checkout, and tears workers down when the user says they are done. Windows + psmux, driven by .claude/session-plugin.json. Triggers on "/crew:session", "plan this spec", "make issues from this spec", "start a worktree", "dispatch workers", "blast through these issues", "tell the worker", "let me see it locally", "merge it", "pull it in".
-argument-hint: "[status|plan|start|start-issues|launch|review-start|relay|local|merge|pull|done|list|resume|finish|restore|cleanup|server-start|server-check|server-stop] [name|issue-numbers|PR#]"
+description: The CONDUCTOR role in a crew build - the user's own session. Dispatches parallel git-worktree workers in psmux, orchestrates them itself (/crew:orchestrate: monitor loop, browser review of each branch, course corrections), relays the user's feedback into worker windows, brings workers' changes onto the user's machine to look at, merges on the user's go-ahead into the detected integration branch, pulls merged work into the local checkout, and tears workers down when the user says they are done. Windows + psmux, driven by .claude/session-plugin.json. Triggers on "/crew:session", "plan this spec", "make issues from this spec", "start a worktree", "dispatch workers", "blast through these issues", "tell the worker", "let me see it locally", "merge it", "pull it in".
+argument-hint: "[status|plan|start|start-issues|orchestrate|relay|local|merge|pull|done|list|resume|finish|restore|cleanup|server-start|server-check|server-stop] [name|issue-numbers|PR#]"
 disable-model-invocation: false
 allowed-tools: Bash(git *), Bash(gh *), Bash(node *), Bash(bash *), Bash(pwsh *), Bash(psmux *), Bash(powershell.exe *), Bash(cmd.exe *), Bash(pwd), Bash(cat *), Read, Glob, Grep, mcp__claude_ai_GitProjects__project_get, mcp__claude_ai_GitProjects__project_list, mcp__claude_ai_GitProjects__project_list_fields, mcp__claude_ai_GitProjects__project_search_items, mcp__claude_ai_GitProjects__github_resolve_issue, mcp__claude_ai_GitProjects__github_resolve_pull_request, mcp__claude_ai_GitProjects__project_add_item_with_fields, mcp__claude_ai_GitProjects__project_update_item_field, mcp__claude_ai_GitProjects__project_bulk_update_items
 ---
@@ -12,37 +12,33 @@ allowed-tools: Bash(git *), Bash(gh *), Bash(node *), Bash(bash *), Bash(pwsh *)
 
 Look for `.claude-bootstrap.md` in your working directory.
 
-- **It exists** → you are a worker, the orchestrator or the reviewer. Follow that file. The
-  orchestrator uses `/crew:orchestrate`, the reviewer `/crew:review`. Stop reading here.
+- **It exists** → you are a worker. Follow that file. Stop reading here.
 - **It doesn't** → you are the **conductor**: the user's own session, in their main checkout.
   Everything below is yours. Take the role without being asked.
 
-## The four roles
+## Two roles
 
-| Role | Where | Job | Merges? Touches the main checkout? |
-|---|---|---|---|
-| Workers | psmux window per worktree | Build one piece, open a PR | No |
-| Orchestrator | psmux `orchestrator` window, `/loop` | Poll workers, nudge stuck ones, flag green PRs `READY FOR USER REVIEW` | No |
-| Reviewer | psmux `reviewer` window, `/loop` | Test + `/code-review` each green PR, label `READY-VERIFIED`, order the merge queue | No |
-| **Conductor (you)** | The user's session, main checkout | **Everything that involves the user or their machine** | **Yes, the only one** |
+| Role | Where | Job |
+|---|---|---|
+| Workers | a psmux window per worktree | Build one piece, open a PR |
+| **You: conductor and orchestrator** | the user's own session, in the main checkout | **Everything else**: dispatch, monitor, review in the browser, steer, merge, pull, tear down |
 
-The orchestrator and reviewer are barred from merging and from the main checkout, so every
-job that needs either falls to you. You are the user's single point of contact with the
-workers.
-
-**You watch the watchers.** The orchestrator steers workers (reads their panes, nudges them);
-you don't duplicate that. What you do is make sure every terminal is up and doing its job:
-the orchestrator and reviewer are running their loops, every worker's CLI is alive, nothing
-is stuck with unsent input. That is `status`, on a slow `/loop` for as long as a build runs.
+The workers are the **only** psmux windows. There is no orchestrator window and no reviewer
+window, and you never launch one. You orchestrate here, with `/crew:orchestrate`:
+- a monitor loop that runs until the batch is done;
+- one task per worker, mirroring its issue's checklist;
+- a review of each worker's branch, one at a time, in a real browser (`playwright-cli`),
+  with the dev-lifecycle verification and page skills;
+- course corrections sent back into the worker's window.
 
 ### What the conductor does, in the order it usually happens
 
 0. **Plan**, when the user brings a spec and there are no issues for it yet (`plan`): cut the
    spec into issues **without inventing anything**, show the plan, create on their word.
-1. **Dispatch** workers (`start`, `start-issues`) and make sure the orchestrator and
-   reviewer are running (`launch`).
-2. **Watch** every terminal: `/loop 10m /crew:session status`, started by `launch`. Fix what's
-   down; bring the user what's ready.
+1. **Dispatch** workers (`start`, `start-issues`).
+2. **Orchestrate** them yourself: `/crew:orchestrate start`. It builds the task list and runs the
+   monitor loop: health, progress, one browser review per pass, corrections back to the workers.
+   It stops when the batch is done.
 3. **Relay** the user's feedback into the right worker's window (`relay`). "The intake form
    is missing the phone field" means: find the worker that owns it, and tell it.
 4. **Bring changes local** so the user can see them before merge (`local`).
@@ -82,9 +78,9 @@ The scripts resolve the same config themselves; pass `-Config "<repo>/.claude/se
 
 ```
 psmux SESSION (= <sess>) — persistent, survives terminal closing
-  ├── WINDOW orchestrator — the orchestrator's /loop
-  ├── WINDOW reviewer     — the reviewer's /loop
   └── WINDOW per worker   — shell in the worker's worktree, running the worker CLI
+
+Your session (not in psmux) — the conductor and orchestrator
 ```
 
 You read a window with `psmux capture-pane -t <sess>:<name> -p` and type into it with
@@ -105,12 +101,11 @@ touch the *same* module's files collide at merge time. Parallelize **across** mo
 
 | Command | What it does |
 |---------|-------------|
-| `status` | **Health watchdog** (the conductor's `/loop` body): every window up and working? Fix what isn't, then the overseers' latest reports |
+| `status` | Where the batch stands right now: every worker's health, PRs, and your review queue |
 | `plan <spec...>` | A spec with no issues yet → issues cut from the spec (nothing invented), approved by the user, wave 1 dispatched |
-| `start <name>` | Worktree + worker for one piece of work, then `launch` if the orchestrator isn't up |
-| `start-issues <n> <n> ...` | **Bulk.** One worker per GitHub issue (`fix/<n>-<slug>`), then `launch` |
-| `launch` | Start the orchestrator (+ reviewer) if their windows aren't running |
-| `review-start` | Start only the reviewer |
+| `start <name>` | Worktree + worker for one piece of work, then orchestrate |
+| `start-issues <n> <n> ...` | **Bulk.** One worker per GitHub issue (`fix/<n>-<slug>`), then orchestrate |
+| `orchestrate` | `/crew:orchestrate start`, in this session: tasks, monitor loop, browser reviews, corrections |
 | `relay <worker> "<msg>"` | Send the user's feedback into a worker's window |
 | `local <worker\|PR#>` | Run a worker's branch on the user's machine (or give the preview URL) |
 | `merge <PR#...>` | The merge protocol: review routing → base check → overlap order → squash-merge |
@@ -125,41 +120,36 @@ touch the *same* module's files collide at merge time. Parallelize **across** mo
 
 ---
 
-## `status`: are the terminals up and doing their jobs?
+## `status`: where the batch stands
 
-The conductor's watchdog, and the body of its `/loop 10m /crew:session status`. Also what
-you run when the user asks how it's going.
+What you run when the user asks how it's going. The monitor loop (`/crew:orchestrate poll`)
+does the same checks on every pass; this is the on-demand version.
 
-1. **Health of every terminal:**
+1. **Health of every worker:**
    ```
    pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-crew-health.ps1" -Config "<repo>/.claude/session-plugin.json" -Json
    ```
-   One row per expected window (orchestrator, reviewer, one per worker worktree):
+   One row per worker worktree:
 
    | State | Meaning | What you do |
    |---|---|---|
-   | `running` | CLI is up | Compare `PaneHash` with last tick: an **overseer** whose pane hasn't changed across a tick has a stalled loop → look at it (`capture-pane`) and restart it (`launch`) if it's hung |
+   | `running` | CLI is up | A worker whose `PaneHash` hasn't changed for two polls and isn't done is stalled → read its pane and nudge it |
    | `pending` | Text sits unsent in its input box: its loop and every nudge are blocked | Show the user the text (`Detail`). Submit it if it's clearly an intended instruction (`psmux send-keys -t <sess>:<name> C-m`; the first submit is sometimes eaten, so re-check and press again), else clear it (`C-u`) |
    | `dialog` | Stuck on a first-run screen (folder trust / bypass warning); it will never read its brief | `capture-pane` to read it. Its options are a menu, not numbered: `psmux send-keys -t <sess>:<name> Down` until `❯` is on the "Yes" option (re-capture to check), then `Enter`. Then send its brief line with `send-to-worker.ps1` (`Read .claude-bootstrap.md and follow it exactly.`) |
-   | `exited` | Window is there, CLI has quit | Overseer → `launch`. Worker → `resume <name>` |
-   | `missing` | No window | Overseer → `launch`. Worker whose PR is open or unstarted → `resume <name>` (ask first). Worker whose PR merged → dormant, just count it |
+   | `exited` | Window is there, CLI has quit | `resume <name>` (ask first) |
+   | `missing` | No window | PR open or unstarted → `resume <name>` (ask first). PR merged → dormant, just count it |
 
-   Fix overseers without asking: they hold no user work. Ask before resuming workers.
-2. **What the overseers report**, read from their panes, not re-derived:
-   ```
-   psmux capture-pane -t <sess>:orchestrator -p -S -80
-   psmux capture-pane -t <sess>:reviewer -p -S -80
-   ```
+   Ask before resuming a worker: it may hold work in progress. `orphanWindows` lists windows
+   with no worktree, such as old `orchestrator`/`reviewer` windows from before; close them.
+2. **Your review queue**: your tasks (`TaskList`) and the PRs: reviewed, waiting, sent back.
 3. **Board in step?** `project_search_items` for the batch. A PR opened since the last tick →
    its item to **In review**. Board behind reality → advance it, say so in one line.
    Connector unavailable → say the board isn't being updated.
 4. **Next wave?** If a `plan` left later waves undispatched, check whether all of a wave's
    `Depends on` issues are now merged. If so, say that wave is unblocked (dispatch on the
    user's word).
-5. **Report**, compactly: anything you fixed; then ready for review (and how: preview or
-   `local`), the verified queue, blocked workers, merged PRs. One line each. On a `/loop`
-   tick with nothing new and nothing fixed, say so in one line.
-6. **Stop the loop** when no workers, no open batch PRs, no pending waves and no overseers remain.
+5. **Report**, compactly: anything you fixed; then reviewed and ready for merge, waiting for
+   review, sent back to workers, merged. One line each.
 
 ## `plan <spec path...>`: a spec, but no issues yet
 
@@ -180,7 +170,7 @@ write issues that say more than the spec does. Full protocol:
    dispatcher reads them, so the worker is briefed to build that spec as a feature, not to tweak
    existing code. **Put each one on the project board** (Todo for wave 1, Backlog for later
    waves, Blocked for `needs-decision`), filling only fields the spec or user states.
-6. `start-issues` for wave 1 only, then `launch`. Later waves on the user's word, once their
+6. `start-issues` for wave 1 only, then `/crew:orchestrate start`. Later waves on the user's word, once their
    dependencies merge.
 
 A single, already-clear piece doesn't need issues: `start <name> -Task "..."` with
@@ -199,8 +189,8 @@ Create a worktree and dispatch a worker. Full steps: [reference/commands-core.md
    ```
 3. Report: branch, worktree path, psmux target `<sess>:<name>`, `psmux attach -t <sess>`.
    If the work has an issue, move its board item to **In Progress**.
-4. **`launch`** if the orchestrator window isn't running (it starts your `status` watchdog
-   too). Don't start a per-worker monitor loop: steering workers is the orchestrator's job.
+4. **Orchestrate**: `/crew:orchestrate start` if you aren't already (it adds the new worker to
+   the tasks and the monitor loop).
 
 Never `cd` into a worktree from this session.
 
@@ -213,31 +203,28 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dis
 Per issue: `gh issue view` (skip if not OPEN) → branch/window `fix/<n>-<slug>` → brief
 (issue body + team rules + test/commit/PR contract with `Closes #<n>`) → dispatch. Report the
 per-issue table, move each dispatched issue's board item to **In Progress**
-(`project_bulk_update_items`), then **`launch`** if the orchestrator isn't running. Use for backlogs with
+(`project_bulk_update_items`), then **`/crew:orchestrate start`** if you aren't already. Use for backlogs with
 clear acceptance criteria; greenfield pieces use `start <name>`.
 
-## `launch`
-
-Start the overseers. Skip either one whose window already exists (`psmux list-windows -t <sess>`).
+## `orchestrate`: you watch, check and steer, in this session
 
 ```
-pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
+/crew:orchestrate start
 ```
 
-This also launches the reviewer (unless `-NoReviewer`). Both run in their own detached
-worktrees and `/loop` themselves. Stop one with `psmux kill-window -t <sess>:<name>`; both
-self-terminate once no workers and no open batch PRs remain.
+That builds one task per worker from its issue's checklist and starts the monitor loop
+(`/loop 10m /crew:orchestrate poll`). Each pass:
+- checks every worker's health;
+- reads their panes and nudges any that are stuck;
+- checks their PRs and CI;
+- reviews **one** branch in a real browser (`playwright-cli`, headed): the widths, links,
+  interactions, console and network, plus `dev-lifecycle:verify`, the page skills' design
+  checks and `/code-review`;
+- sends the findings back into that worker's window and onto its PR.
 
-Then **verify they came up**: about a minute later run `status`; both should be `running`
-with a first report in their panes. And start your own watchdog, if it isn't already
-running in this session: `/loop 10m /crew:session status`.
+It stops when the batch is done. Full protocol: `/crew:orchestrate`.
 
-## `review-start`
-
-Only the reviewer (for example when workers were started without the orchestrator):
-```
-pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-reviewer.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
-```
+Nothing runs in a separate orchestrator or reviewer window.
 
 ## `relay <worker> "<message>"`: the user's feedback, into the worker
 
@@ -290,9 +277,8 @@ After the merge, `pull` is how the user gets the change in their own checkout.
 
 Never merge before the user has reviewed, and never merge on your own initiative.
 
-1. **Review routing done?** Each PR was seen on its preview or via `local`, or the user says
-   to skip that. If the reviewer is running, prefer PRs it labelled `READY-VERIFIED`, in its
-   queue order.
+1. **Reviewed?** Each PR passed your browser review (`/crew:orchestrate review <worker>`) and the
+   user has seen it on its preview or via `local`, or the user says to skip that.
 2. **Base check.** `gh pr view <n> --json baseRefName`. It must equal `<base>`. A PR aimed
    elsewhere (e.g. `master` in a repo that integrates on `staging`) is stopped and shown to the
    user, with the fix: `gh pr edit <n> --base <base>`. Don't retarget without saying so.
@@ -348,7 +334,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dis
 ```
 Rebuilds the session with a window per worktree and resumes each worker's conversation
 (`claude --continue` / `codex resume --last`). `-Idle` resumes without nudging; `-Name <wt>`
-for one. Then `launch` again.
+for one. Then `/crew:orchestrate start` again.
 
 ## `finish <name>`
 
@@ -375,12 +361,11 @@ branch, `local` is the usual entry point.
 | Script | Purpose |
 |--------|---------|
 | `status/resolve-config.ps1` | The config as the scripts see it, including the resolved `<base>` |
-| `status/check-crew-health.ps1` | The watchdog: every expected window's state (`running` / `pending` / `exited` / `missing`) + a pane hash to spot stalls |
+| `status/check-crew-health.ps1` | Every worker's state (`running` / `pending` / `dialog` / `exited` / `missing`) + a pane hash to spot stalls, + orphan windows |
 | `dispatch/send-to-worker.ps1` | Type a message into a window and verify it was submitted |
 | `dispatch/psmux-dispatch.ps1` | **Primary dispatch.** Worktree + env + deps + psmux window + worker launch + brief. `-Name` + `-Task`/`-Bootstrap`/`-BootstrapFile`; `-Mode feature\|iteration`, `-Spec`, `-IssueNumber`; `-WorkerCliName codex` for a Codex worker |
 | `dispatch/psmux-dispatch-issues.ps1` | **Bulk dispatch**, one worker per issue. `-Issues 510,511,512` |
-| `dispatch/start-orchestrator.ps1` | Orchestrator window + its `/loop`; also the reviewer unless `-NoReviewer` |
-| `dispatch/start-reviewer.ps1` | Reviewer window + its home and `review-checkout` worktrees + `/loop` |
+
 | `dispatch/restore-session.ps1` | Crash recovery: rebuild the session, resume each worker |
 | `dispatch/dispatch-codex.ps1` | Headless `codex exec` build-ahead lane (no psmux pane) |
 | `dispatch/dispatch-worktree.ps1` | Headless one-shot `claude -p` |
@@ -401,7 +386,7 @@ branch, `local` is the usual entry point.
 6. **Worker deps follow `worktreeDeps`**: `junction` shares the main checkout's `node_modules`, `install` gives each worktree its own.
 7. **Junction-first teardown.** Never `git worktree remove` a worktree whose junctions are still attached; use `close-worker.ps1`.
 8. **Only the conductor merges**, and only on the user's word.
-9. **`/loop` is the cron.** The orchestrator and reviewer loop every few minutes and steer the work; the conductor loops `status` every ~10 minutes and keeps the terminals healthy. The conductor does not nudge workers on its own; it relays the user's feedback.
+9. **One loop, in this session.** `/crew:orchestrate` runs the monitor loop here until the batch is done. Workers are the only psmux windows; never launch an orchestrator or reviewer window.
 10. **Never check a PR branch out in the main checkout.** Run it from the worker's worktree (`local`).
 11. **Review routing.** Frontend-only → Vercel preview. Backend / full-stack → a local run.
 12. **Workers stay alive after merge.** Teardown (`done`) only on the user's word.
@@ -419,8 +404,8 @@ branch, `local` is the usual entry point.
 - build protocol (teams, testing, sub-agents): [reference/build-protocol.md](reference/build-protocol.md)
 - psmux commands: [reference/psmux-cheatsheet.md](reference/psmux-cheatsheet.md)
 - the whole start-to-finish workflow: [reference/psmux-workflow.md](reference/psmux-workflow.md)
-- what the orchestrator does: `/crew:orchestrate` ([its reference](../orchestrate/reference/commands-orchestrate.md))
-- what the reviewer does: `/crew:review` ([its reference](../review/reference/commands-review.md))
+- orchestrating the batch (monitor loop, tasks, corrections): `/crew:orchestrate` ([its reference](../orchestrate/reference/commands-orchestrate.md))
+- the browser review of a branch: [browser-review.md](../orchestrate/reference/browser-review.md)
 - **a cloud lane exists**: `/crew:session-cloud` runs this same four-role governance with
   `claude --cloud` sessions instead of psmux windows — no local worktrees for workers, no
   laptop required to stay open. Same config, same board rules, independent of this lane;

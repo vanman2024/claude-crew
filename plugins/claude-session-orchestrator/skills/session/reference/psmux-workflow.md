@@ -92,20 +92,20 @@ the flag for the main/orchestrator session or anything without a PR review step.
 - Scroll back: `Ctrl+B + [`.
 - Detach anytime: `Ctrl+B + d` — sessions keep running.
 
-### The orchestrator's role (autonomous, via `/loop`)
-The conductor launches it (`/crew:session launch`, i.e. `dispatch/start-orchestrator.ps1`).
-From its own detached worktree window it runs `/crew:orchestrate poll` every N minutes:
+### Orchestrating (your session, via `/loop`)
+Your own session orchestrates: `/crew:orchestrate start`. There is no orchestrator window. Every
+`poll` (default every 10 minutes, until the batch is done):
 
-1. `psmux capture-pane` on each worker pane; read the last ~25 lines.
-2. Detect state — **working** (no action), **waiting for input** (answer it),
-   **stuck** (nudge), **errored** (report/correct), **done** (PR opened → flag
-   `READY FOR USER REVIEW`, stop polling that worker).
-3. Send nudges via `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "<msg>" -Config "<repo>/.claude/session-plugin.json"`.
-4. Flag green, mergeable PRs in the batch as ready. **It never merges.**
-5. After **you** merge a PR, it reports it `MERGED`. The worker stays alive until you say it is done.
-6. Self-terminates when no live workers and no open batch PRs remain.
+1. Health of every worker window (`check-crew-health.ps1`); fix blocked ones.
+2. `psmux capture-pane` on each worker; nudge the stuck ones with `send-to-worker.ps1`.
+3. PRs and CI; tell a worker when its CI is red or its PR conflicts.
+4. **Review one branch in a real browser**: run it with `-AutoPort` and open it with
+   `playwright-cli` headed. At 390/768/1440 check real data, links, interactions, console,
+   network and design; run `dev-lifecycle:verify`, the page skills' checks and `/code-review`;
+   send the findings back to the worker and onto the PR.
+5. Keep your tasks and the issue/PR checkboxes true.
 
-`/loop` is the cron — there are no Windows scheduled tasks or PowerShell sleep loops.
+`/loop` is the cron: no Windows scheduled tasks, no PowerShell sleep loops.
 
 ### Things you can do without leaving psmux
 
@@ -136,7 +136,7 @@ When a worker opens its PR (`gh pr create ... --base <base> ... Closes #N`) it
 goes quiet. You work it through the conductor (your own session):
 1. Review it: the Vercel preview, or `/crew:session local <name>` to run it on your machine.
 2. Tell the conductor what's wrong; it relays it into the worker's pane (`relay`).
-3. Iterate until it's right; confirm CI is green (and `READY-VERIFIED`, if the reviewer runs).
+3. Iterate until it's right; confirm CI is green and its browser review passed.
 4. **"Merge it"**: the conductor merges into `<base>` and offers to `pull` it into your checkout.
 
 ### Teardown, when you say a worker is done — junction-first

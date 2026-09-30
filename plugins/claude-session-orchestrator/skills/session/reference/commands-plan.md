@@ -137,7 +137,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dis
 ```
 
 It prints `From issue: spec=... mode=feature` per issue; if that line is missing, the header
-lines are malformed. Fix the issue body before the worker starts. Then `launch`.
+lines are malformed. Fix the issue body before the worker starts. Then `/crew:orchestrate start`.
 
 Later waves: when all of a wave's dependencies have merged, tell the user that the next wave is
 unblocked and dispatch it on their word. `status` checks for this on each tick.

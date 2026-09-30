@@ -1,13 +1,12 @@
 # check-crew-health.ps1
 #
-# The conductor's watchdog: is every terminal of this crew build up and doing its job?
-# The orchestrator steers workers; this checks the orchestrator, the reviewer and the
-# workers themselves are still there to be steered.
+# The orchestrator's health check: is every worker's terminal up and doing its job?
+# The orchestrator runs in the user's own session (/crew:orchestrate), so the only psmux
+# windows are the workers.
 #
-# One row per expected window:
-#   orchestrator, reviewer - always expected while a build is running
-#   one per worker worktree - every active worktree under worktreesPath, minus the
-#                             infra ones (orchestrator, reviewer, review-checkout)
+# One row per worker: every active worktree under worktreesPath. Worktrees named
+# orchestrator / reviewer / review-checkout are skipped: leftovers from the retired
+# overseer windows, not workers.
 # State:
 #   missing  - no psmux window (never launched, killed, or the psmux server died)
 #   exited   - the window is there but its CLI has quit (bare shell prompt)
@@ -46,8 +45,8 @@ foreach ($line in (git -C $cfg.repoPath worktree list --porcelain 2>$null)) {
 }
 
 # psmux occasionally answers `ls` with nothing for a moment (seen live: one check said the
-# session was NOT RUNNING while it was up). The conductor relaunches overseers that look
-# missing, so a single empty answer is retried before it is believed.
+# session was NOT RUNNING while it was up). The orchestrator acts on a missing worker, so a
+# single empty answer is retried before it is believed.
 $sessionAlive = $false; $windows = @()
 for ($attempt = 1; $attempt -le 3; $attempt++) {
     $sessionAlive = [bool](psmux ls 2>$null | Select-String -SimpleMatch "${sess}:")
@@ -56,10 +55,7 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
     Start-Sleep -Seconds 2
 }
 
-$expected = @(
-    @{ Name = "orchestrator"; Role = "orchestrator" },
-    @{ Name = "reviewer";     Role = "reviewer" }
-) + @($workers | ForEach-Object { @{ Name = $_; Role = "worker" } })
+$expected = @($workers | ForEach-Object { @{ Name = $_; Role = "worker" } })
 
 $sha = [Security.Cryptography.SHA1]::Create()
 $rows = foreach ($e in $expected) {

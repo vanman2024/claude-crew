@@ -5,6 +5,30 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed: the orchestrator is your session, and it reviews in a real browser
+- **No more orchestrator or reviewer windows.** The workers are the only psmux windows.
+  The user's own session conducts *and* orchestrates. `start-orchestrator.ps1`,
+  `start-reviewer.ps1` and the psmux `/crew:review` skill are removed, and review is folded
+  into orchestrate. `/crew:session launch` and `review-start` are gone; after dispatching,
+  run `/crew:orchestrate start` in the same session.
+- **`/crew:orchestrate` rewritten for that role**:
+  - one task per worker, from its issue's checklist;
+  - a monitor loop (`/loop 10m /crew:orchestrate poll`) that stops when the batch is done;
+  - each pass checks health, reads panes and nudges stuck workers, and checks PRs and CI;
+  - **one browser review per pass**: the worker's branch runs from its worktree (`-AutoPort`)
+    and opens with **`playwright-cli` headed** (the project's `browserVerify` can override);
+    at 390/768/1440 it checks real data, links, interactions, console, network and design;
+    it runs `dev-lifecycle:verify`, the page skills' design and SEO checks, `/code-review`
+    and the issue's own checklist;
+  - findings go back into the worker's window (`send-to-worker.ps1`) and onto the PR; issue
+    boxes are ticked only with evidence;
+  - `integrate` merges the reviewed PRs into `<base>` on the user's word, for a page-by-page
+    pass there.
+
+  New reference: `skills/orchestrate/reference/browser-review.md`.
+- `check-crew-health.ps1` expects worker windows only. Leftover `orchestrator`/`reviewer`
+  windows show as orphan windows, to close.
+
 ### Changed
 - **One skill per role.** The user's own session, the orchestrator and the reviewer all
   loaded the same `/crew:session` skill, which addressed its reader as the orchestrator. So

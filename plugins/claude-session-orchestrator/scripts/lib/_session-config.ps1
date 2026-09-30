@@ -777,11 +777,11 @@ function Get-PluginRoot {
     return (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 }
 
-# Every Claude window these scripts launch (orchestrator, reviewer, workers) gets
+# Every Claude window these scripts launch (the workers) gets
 # --plugin-dir pointing at the copy of crew that launched it. Without it a window loads
 # whatever copy is INSTALLED - which can be months older than the conductor's (the
 # marketplace entry is a local directory that never fetches) - so its brief names skills
-# (/crew:orchestrate, /crew:review) that its plugin doesn't have.
+# that its plugin doesn't have.
 function Get-PluginDirArg {
     return "--plugin-dir `"$(Get-PluginRoot)`""
 }
