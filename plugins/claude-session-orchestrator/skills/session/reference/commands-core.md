@@ -182,16 +182,12 @@ window's shell is already rooted there. Watch it with `psmux capture-pane -t <se
 Branch, worktree path, psmux target (`<sess>:<name>`), and the attach command
 (`psmux attach -t <sess>`).
 
-### Step 10: Make sure the orchestrator is watching
+### Step 10: Orchestrate it, in this session
 
-**Do NOT skip this step.** A dispatched worker needs someone polling it, or it drifts and
-builds nothing. That someone is the orchestrator, not this session: check
-`psmux list-windows -t <sess>` for an `orchestrator` window and, if there isn't one, run
-`launch` (`start-orchestrator.ps1`). Its `/loop` polls every worker, new ones included.
-
-The conductor does NOT start a per-worker monitor loop. Its own loop is the `status` watchdog
-(`/loop 10m /crew:session status`, started by `launch`), which checks every terminal is up,
-including this new worker's, and reads the orchestrator's report.
+**Do NOT skip this step.** A dispatched worker needs watching, or it drifts and builds nothing.
+That's you, in this session: `/crew:orchestrate start` if you aren't already orchestrating. It
+adds the worker to your tasks and to the monitor loop, and reviews its branch in the browser
+once it's ready. Never launch an orchestrator or reviewer window; there are none.
 
 ---
 

@@ -249,27 +249,27 @@ The same scripts drive both layouts; behavior comes entirely from this config.
 
 ### One skill per role
 
-Each Claude in a crew build loads only the skill for its own job, so none of them
-mistakes itself for another:
+Two roles. **Workers** are the only psmux windows; **your own session** conducts and
+orchestrates them. There is no orchestrator window and no reviewer window.
 
 | Skill | Who uses it | Job |
 |---|---|---|
-| `/crew:session` | **You**: your own session, the conductor | Dispatch, relay your feedback into workers, run their branches locally, merge, pull, tear down |
-| `/crew:orchestrate` | The `orchestrator` window (its brief calls it) | Poll workers, nudge, flag green PRs `READY FOR USER REVIEW` |
-| `/crew:review` | The `reviewer` window (its brief calls it) | Test + `/code-review` each green PR, label `READY-VERIFIED`, order the merge queue |
+| `/crew:session` | **You**: your own session, the conductor | Plan, dispatch, relay your feedback into workers, run their branches locally, merge, pull, tear down |
+| `/crew:orchestrate` | **You**, in the same session | Monitor loop until the batch is done; one task per worker from its issue's checklist; reviews each branch **one at a time in a real browser** (`playwright-cli`: widths, links, interactions, console, network) with `dev-lifecycle:verify`, the page skills' design checks and `/code-review`; sends findings back into the worker's window and onto its PR |
 | `/crew:build` | Your session, for one feature built in place | The same build protocol, without worktrees |
 
-`/crew:session` starts by checking for a `.claude-bootstrap.md`. With none, it is the
-conductor and acts like one; only the conductor merges or touches your checkout.
+`/crew:session` starts by checking for a `.claude-bootstrap.md`. With one, the session is a
+worker; without, it's yours: the conductor, and the only session that merges or touches your
+checkout.
 
 ### Conductor commands (`/crew:session ...`)
 
 | Command | What it does |
 |---------|-------------|
-| `status` | Watchdog: is every terminal up and working (`running` / `pending` / `exited` / `missing`)? Fixes overseers, then relays their reports. `launch` loops it every 10 min |
+| `status` | Where the batch stands: every worker's health (`running` / `pending` / `dialog` / `exited` / `missing`), PRs, your review queue |
 | `plan <spec...>` | Spec with no issues yet → issues cut from the spec (open questions asked, nothing invented), created on your go, wave 1 dispatched |
-| `start <name>` / `start-issues 510 511 512` | Dispatch one worker / one per GitHub issue, then `launch` if needed |
-| `launch` | Start the orchestrator (+ reviewer) if they aren't running |
+| `start <name>` / `start-issues 510 511 512` | Dispatch one worker / one per GitHub issue, then orchestrate |
+| `orchestrate` | `/crew:orchestrate start` in this session: tasks, monitor loop, browser reviews, corrections |
 | `relay <worker> "<msg>"` | Send your feedback into a worker's window (via `send-to-worker.ps1`, which verifies it was submitted) |
 | `local <worker\|PR#>` | Run a worker's branch on your machine (`-AutoPort`), or give the preview URL |
 | `merge <PR#...>` | Base check → overlap order → squash-merge into `<base>` |
@@ -300,20 +300,27 @@ fills only fields the spec or you state; required fields it can't source are lef
 listed.
 Protocol: `skills/session/reference/commands-board.md`.
 
-### The orchestrator
+### Orchestrating: in your session, with a real browser
 
-`/crew:session launch` runs:
+After dispatching, run `/crew:orchestrate start` in the same session. It:
 
-```
-pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/start-orchestrator.ps1" -IntervalMin 5 -Config "<repo>/.claude/session-plugin.json"
-```
+1. makes **one task per worker**, from its issue's checklist;
+2. starts the **monitor loop** (`/loop 10m /crew:orchestrate poll`), which stops when the batch
+   is done;
+3. on each pass checks every worker's health, reads their panes and nudges stuck ones, and
+   checks PRs and CI;
+4. **reviews one branch per pass** in a real browser: runs the worker's branch (`-AutoPort`,
+   beside your own servers) and opens it with `playwright-cli` headed. At 390, 768 and 1440 it
+   checks real data, links, interactions, console and network, and the design. It runs
+   `dev-lifecycle:verify`, the page skills' design and SEO checks, and `/code-review`, all
+   against the issue, the spec and the project's own gates;
+5. sends the findings back into the worker's window and onto its PR, and ticks issue boxes
+   only with evidence;
+6. on your word, **integrates**: merges the reviewed PRs into `<base>` so you can see
+   everything together, then reviews page by page there.
 
-It spawns a dedicated orchestrator Claude with the no-auto-merge + batch-scoped
-brief, runs one immediate poll, then `/loop 5m /crew:orchestrate poll`. It
-flags green PRs as `READY FOR USER REVIEW`, reports what **you** merged (the worker stays
-alive until you say it's done), and self-terminates when no workers and no batch PRs remain.
-
-Stop it early: `psmux kill-window -t <session>:orchestrator`.
+The project's `browserVerify` config can override the browser steps; the default is
+`playwright-cli`, not Claude in Chrome.
 
 ---
 
@@ -374,7 +381,7 @@ claude-session-orchestrator/
 │   └── session-init/     SKILL.md                (the scaffold command)
 ├── scripts/
 │   ├── lib/        _session-config.ps1, _session-brief.ps1   (shared, dot-sourced)
-│   ├── dispatch/   psmux-dispatch[-issues], start-orchestrator, dispatch-worktree
+│   ├── dispatch/   psmux-dispatch[-issues], send-to-worker, restore-session, dispatch-worktree
 │   ├── teardown/   close-worker, cleanup/nuke/kill-worktree-agents
 │   ├── server/     dev-server
 │   ├── status/     check-worktree-health, *-hook.sh, poll-*

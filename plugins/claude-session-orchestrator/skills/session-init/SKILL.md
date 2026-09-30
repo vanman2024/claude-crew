@@ -208,7 +208,7 @@ Config written: <repoPath>\.claude\session-plugin.json
 Try it:
   /crew:session start <feature-name>
   /crew:session start-issues 510 511 512
-  /crew:session launch           (orchestrator + reviewer, if not already running)
+  /crew:orchestrate start        (in this session: monitor loop + browser review of each branch)
   /crew:session status
 ```
 

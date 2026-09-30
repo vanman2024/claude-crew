@@ -17,7 +17,7 @@ Look at the first message this conversation received.
 
 ## STEP 0: resolve the config
 
-Same config `/crew:review` (the psmux reviewer) uses:
+Same config the psmux lane uses:
 
 ```
 pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/resolve-config.ps1" -Config "<repo>/.claude/session-plugin.json"

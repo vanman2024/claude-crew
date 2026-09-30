@@ -2,9 +2,9 @@
 
 > Paths/session/repo/branch come from `.claude/session-plugin.json` — substitute `<repo>`, `<wt>`, `<sess>`, `<gh>`, `<base>`.
 
-**One poll cycle for one worktree agent**, run by the orchestrator (`/crew:orchestrate monitor <name>`). `poll` runs the same analysis across every worker; the conductor never loops this.
+**Reading and steering one worker**: the analysis `/crew:orchestrate poll` runs on every worker, in the user's own session. There is no orchestrator window.
 
-This is the **core feedback loop** between the orchestrator and worktree agents. Without it, agents get sidetracked and build nothing.
+This is the **core feedback loop** between you (the orchestrator, in the user's session) and the workers. Without it, agents get sidetracked and build nothing.
 
 ## Prerequisites
 
@@ -128,11 +128,9 @@ MONITOR [<name>]: <STATE> | commits: <n> | uncommitted: <n> files | action: <wha
 
 ## Relation to `/crew:orchestrate poll`
 
-`poll` runs the full workflow (PRs + monitor + report) for ALL active workers in a single
-pass, using exactly this analysis per worker. `monitor <name>` is the same thing scoped to one
-worker. Neither merges nor tears down (see [commands-orchestrate.md](commands-orchestrate.md)).
-Nobody loops `monitor` separately any more: the orchestrator's `/loop` over `poll` already
-covers every worker, and the conductor (the user's session) never polls.
+`poll` runs this analysis for every worker in one pass, then reviews one branch in the browser
+([browser-review.md](browser-review.md)). Nothing loops per worker: the one `/loop` over `poll`,
+in the user's session, covers them all.
 ---
 
 ## Tracking State Across Polls

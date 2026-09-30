@@ -1,21 +1,21 @@
 ---
 name: orchestrate
-description: The ORCHESTRATOR role in a crew build. One poll of the batch - read every worker's psmux pane, nudge stuck workers, flag green PRs READY FOR USER REVIEW, self-terminate when the batch is done. Only for the orchestrator window that start-orchestrator.ps1 launches (its .claude-bootstrap.md names it the Orchestrator); the user's own session is the conductor and uses /crew:session. Triggers on "/crew:orchestrate poll", "/crew:orchestrate verify <name>".
-argument-hint: "[poll|monitor <name>|verify <name>|verify-all]"
-allowed-tools: Bash(git *), Bash(gh *), Bash(pwsh *), Bash(psmux *), Bash(cmd.exe *), Bash(pwd), Bash(cat *), Read, Glob, Grep
+description: The ORCHESTRATOR, run in the user's own session (the conductor) - never in a psmux window. Monitors every worker on a schedule until the batch is done, keeps one task per worker mirroring its issue's checklist, course-corrects workers in their psmux windows, and reviews each worker's branch ONE AT A TIME in a real browser with playwright-cli (widths, links, interactions, console, network) plus the dev-lifecycle verification and page skills and /code-review, then sends findings back to the worker and ticks the issue/PR. Review is part of this; there is no separate reviewer. Triggers on "/crew:orchestrate", "orchestrate them", "monitor the workers", "are you monitoring them", "check their work in the browser", "keep them on track".
+argument-hint: "[start|poll|review <worker>|integrate|stop]"
+allowed-tools: Bash(git *), Bash(gh *), Bash(pwsh *), Bash(psmux *), Bash(playwright-cli *), Bash(npm *), Bash(cmd.exe *), Bash(pwd), Bash(cat *), Read, Glob, Grep, Skill, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
 
-# Orchestrate: the orchestrator's poll
+# Orchestrate: you watch, check and steer the whole batch
 
-## Are you the orchestrator?
+## Where this runs
 
-Look for `.claude-bootstrap.md` in your working directory.
+**In the user's own session**, the same one that dispatched the workers (`/crew:session`). You
+are the conductor *and* the orchestrator. The only psmux windows are the **workers**; there is
+no orchestrator window and no reviewer window, and you never launch one. Review is not a
+separate role either: it is the browser review below.
 
-- It says **"You are the Orchestrator Claude"** → you are. Carry on.
-- It names another role (worker, reviewer) → follow that file, not this skill.
-- There is no `.claude-bootstrap.md` → you are the user's own session, **the conductor**.
-  Do not poll. Tell the user so, and use `/crew:session` (its `launch` subcommand starts the
-  orchestrator if it isn't running).
+If this session is a worker (it has a `.claude-bootstrap.md` in its working directory), stop:
+workers don't orchestrate.
 
 ## STEP 0: resolve the config
 
@@ -23,32 +23,31 @@ Look for `.claude-bootstrap.md` in your working directory.
 pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/resolve-config.ps1" -Config "<repo>/.claude/session-plugin.json"
 ```
 
-Use its `defaultBranch` as `<base>`, never the raw JSON: `defaultBranch` there may be `auto`,
-meaning it is detected from where merged PRs actually land. Substitute `<repo>`, `<wt>`
-(worktreesPath), `<sess>` (psmuxSession), `<gh>` (githubRepo) the same way.
-
-## What you do and never do
-
-| You do | You never do |
-|---|---|
-| Read worker panes (`psmux capture-pane`) and nudge stuck workers (`dispatch/send-to-worker.ps1`, which verifies the nudge was submitted) | `gh pr merge`. The user approves every merge through the conductor |
-| Report green batch PRs as `READY FOR USER REVIEW` | Touch the main checkout at `<repo>`: no checkout, no pull, no commit |
-| Report merged PRs as `MERGED`, and keep reporting the worker as alive | Tear down a worker. Only the conductor does that, and only when the user says a worker is done |
-| Self-terminate when no worker windows and no open batch PRs remain | Poll with `Start-Sleep` or a scheduled task. `/loop` is the cadence |
-| Read issues and PRs with `gh` | Change the project board. The conductor is its only writer; your report is what it acts on |
-
-The user talks to the **conductor** (their own session). It relays their feedback to workers
-and brings changes to their machine. You watch the batch and report; you are not the user's
-channel to the workers.
+`<base>` is the resolved `defaultBranch` (never the raw JSON, which may say `auto`). Substitute
+`<repo>`, `<wt>` (worktreesPath), `<sess>` (psmuxSession), `<gh>` (githubRepo) the same way.
 
 ## Subcommands
 
 | Command | What it does |
 |---|---|
-| `poll` | **The `/loop` body.** Batch → panes → nudges → PR status → report. |
-| `monitor <name>` | One poll cycle for a single worker. |
-| `verify <name>` / `verify-all` | Shallow check that the PR contains the brief's deliverables. The reviewer does the deep pass. |
+| `start` | Build the task list, then begin the monitor loop. Run once, after workers are dispatched |
+| `poll` | One pass: health, progress, PRs, then the next browser review. The loop body |
+| `review <worker>` | The browser review of one worker's branch, now |
+| `integrate` | On the user's word: bring all green, reviewed PRs into `<base>` so everything is visible together, then review page by page there |
+| `stop` | End the loop |
 
-Full protocol, contracts and nudge templates:
-- `poll`, `verify`, `verify-all`: [reference/commands-orchestrate.md](reference/commands-orchestrate.md)
-- `monitor` and the message templates: [reference/commands-monitor.md](reference/commands-monitor.md)
+Full protocol: [reference/commands-orchestrate.md](reference/commands-orchestrate.md). The
+browser review, step by step: [reference/browser-review.md](reference/browser-review.md). Nudge
+templates: [reference/commands-monitor.md](reference/commands-monitor.md).
+
+## The contract
+
+| You do | You never do |
+|---|---|
+| Monitor on a schedule (`/loop`) and **stop the loop when the batch is done** | Launch an orchestrator or reviewer window, or poll with `Start-Sleep` |
+| Keep **one task per worker**, with its issue's checklist items as the steps, and keep them true | Let your task list and the issue/PR checkboxes disagree |
+| Review each worker's branch **one at a time**, in a real browser with `playwright-cli` (headed) | Use Claude in Chrome or gstack browse for this, unless the project's `browserVerify` says so |
+| Run the checks the work is owed: the issue's checklist, the project's gates (CLAUDE.md, DESIGN.md, the spec), `dev-lifecycle:verify`, the `dev-lifecycle:page-web` / `page-app` checks for pages, `/code-review` | Fix a worker's code yourself. Workers fix; you tell them exactly what |
+| Send findings back into the worker's window (`send-to-worker.ps1`) and onto the PR | Leave the user to find what you could have checked |
+| Tick issue/PR checklist boxes only with evidence (a screenshot, a command's output) | Tick a box on a claim |
+| Merge only on the user's word, into `<base>` | Merge because CI is green |

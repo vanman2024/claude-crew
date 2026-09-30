@@ -6,8 +6,6 @@
 
 BeforeAll {
     $script:ScriptsDir = (Resolve-Path (Join-Path $PSScriptRoot "..\scripts")).Path
-    $script:ReviewerScript = Join-Path $script:ScriptsDir "dispatch\start-reviewer.ps1"
-    $script:OrchScript     = Join-Path $script:ScriptsDir "dispatch\start-orchestrator.ps1"
     $script:CodexScript    = Join-Path $script:ScriptsDir "dispatch\dispatch-codex.ps1"
     $script:PsmuxScript    = Join-Path $script:ScriptsDir "dispatch\psmux-dispatch.ps1"
     $script:ConfigLib      = Join-Path $script:ScriptsDir "lib\_session-config.ps1"
@@ -23,25 +21,6 @@ Describe "All plugin PowerShell scripts parse" {
     It "has no parse errors in <_>" -ForEach (Get-ChildItem (Resolve-Path (Join-Path $PSScriptRoot "..\scripts")).Path -Recurse -Filter *.ps1 | ForEach-Object { $_.FullName }) {
         $errs = Get-ParseErrors $_
         $errs.Count | Should -Be 0 -Because (($errs | ForEach-Object { $_.Message }) -join '; ')
-    }
-}
-
-Describe "start-reviewer.ps1" {
-    It "exists" {
-        Test-Path $script:ReviewerScript | Should -BeTrue
-    }
-
-    It "declares the reviewer + review-checkout worktrees and the no-merge contract" {
-        $body = Get-Content $script:ReviewerScript -Raw
-        $body | Should -Match 'review-checkout'
-        $body | Should -Match 'NEVER run ``gh pr merge``'
-        $body | Should -Match 'checkout --detach'   # avoids the two-worktrees-one-branch conflict
-    }
-
-    It "resolves the interval from config.review.intervalMin when -IntervalMin not passed" {
-        $body = Get-Content $script:ReviewerScript -Raw
-        $body | Should -Match "review.*intervalMin"
-        $body | Should -Match "PSBoundParameters.ContainsKey\('IntervalMin'\)"
     }
 }
 
@@ -155,14 +134,14 @@ Describe "Dispatch robustness: Windows PowerShell 5.1 (npm EBADENGINE killed dis
     }
 }
 
-Describe "One skill per role (conductor / orchestrator / reviewer)" {
+Describe "Two roles: workers in psmux, the user's session conducts and orchestrates" {
     BeforeAll {
         $script:PluginRoot = Split-Path $script:ScriptsDir -Parent
         $script:SkillsDir  = Join-Path $script:PluginRoot "skills"
         function Get-SkillText([string]$Name) { Get-Content (Join-Path $script:SkillsDir "$Name\SKILL.md") -Raw }
     }
 
-    It "<_> skill exists and its frontmatter name matches its folder" -ForEach @('session', 'orchestrate', 'review') {
+    It "<_> skill exists and its frontmatter name matches its folder" -ForEach @('session', 'orchestrate') {
         (Get-SkillText $_) | Should -Match "(?m)^name: $_\s*$"
     }
 
@@ -173,14 +152,15 @@ Describe "One skill per role (conductor / orchestrator / reviewer)" {
         $s | Should -Match 'you are the \*\*conductor\*\*'
     }
 
-    It "the conductor skill covers <_>" -ForEach @('status', 'plan', 'relay', 'local', 'merge', 'pull', 'done', 'launch') {
+    It "the conductor skill covers <_>" -ForEach @('status', 'plan', 'relay', 'local', 'merge', 'pull', 'done', 'orchestrate') {
         (Get-SkillText 'session') | Should -Match "(?m)^## ``$_"
     }
 
-    It "the conductor watches the terminals (status watchdog loop), but never runs a per-worker monitor loop" {
+    It "one loop, in the user's session: /crew:orchestrate poll; no per-worker monitor loop, no status loop" {
         $s = Get-SkillText 'session'
         $s | Should -Not -Match '/loop \S+ /\S*session monitor'
-        $s | Should -Match '/loop 10m /crew:session status'
+        $s | Should -Not -Match '/loop \S+ /crew:session status'
+        $s | Should -Match '/loop 10m /crew:orchestrate poll'
         $s | Should -Match 'check-crew-health\.ps1'
     }
 
@@ -196,31 +176,28 @@ Describe "One skill per role (conductor / orchestrator / reviewer)" {
         $s | Should -Match 'gh pr edit <n> --base <base>'
     }
 
-    It "the <_> skill sends a non-owner back to /crew:session" -ForEach @('orchestrate', 'review') {
-        $s = Get-SkillText $_
+    It "the orchestrator runs in the user's session; a worker session stops" {
+        $s = Get-SkillText 'orchestrate'
+        $s | Should -Match "In the user's own session"
         $s | Should -Match '\.claude-bootstrap\.md'
-        $s | Should -Match '/crew:session'
+        $s | Should -Match "workers don't orchestrate"
     }
 
-    It "the orchestrator brief runs /crew:orchestrate poll, in its /loop too" {
-        $body = Get-Content $script:OrchScript -Raw
-        $body | Should -Match '``/crew:orchestrate poll``'
-        $body | Should -Match '/loop \$\{IntervalMin\}m /crew:orchestrate poll'
+    It "there is no orchestrator or reviewer window: no launchers, no psmux reviewer skill" {
+        Test-Path (Join-Path $script:ScriptsDir "dispatch\start-orchestrator.ps1") | Should -BeFalse
+        Test-Path (Join-Path $script:ScriptsDir "dispatch\start-reviewer.ps1")     | Should -BeFalse
+        Test-Path (Join-Path $script:SkillsDir "review")                            | Should -BeFalse
+        $offenders = Get-ChildItem $script:PluginRoot -Recurse -Include *.md, *.ps1 |
+            Where-Object { $_.Name -ne 'CHANGELOG.md' -and $_.FullName -notmatch '\\tests\\|-cloud\\' } |
+            Select-String -Pattern 'start-orchestrator\.ps1|start-reviewer\.ps1|/crew:review\b|crew:session launch' |
+            ForEach-Object { "{0}:{1}: {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim() }
+        $offenders -join "`n" | Should -BeNullOrEmpty
     }
 
-    It "the reviewer brief runs /crew:review, in its /loop too" {
-        $body = Get-Content $script:ReviewerScript -Raw
-        $body | Should -Match '``/crew:review``'
-        $body | Should -Match '/loop \$\{IntervalMin\}m /crew:review'
-    }
-
-    It "the orchestrator never tears workers down (brief + its reference)" {
-        $brief = Get-Content $script:OrchScript -Raw
-        $brief | Should -Not -Match 'CloseWorkerScript'
-        $brief | Should -Match 'NEVER tear down a worker'
+    It "the orchestrator never tears workers down on its own" {
         $ref = Get-Content (Join-Path $script:SkillsDir "orchestrate\reference\commands-orchestrate.md") -Raw
         $ref | Should -Not -Match 'close-worker\.ps1"? -Name'
-        $ref | Should -Not -Match 'tear down via `close-worker'
+        $ref | Should -Match "Teardown is the user's call"
     }
 
     It "nothing still calls the old /session orchestrate|monitor|review form" {
@@ -239,14 +216,6 @@ Describe "One skill per role (conductor / orchestrator / reviewer)" {
             }
         }
         $broken -join "`n" | Should -BeNullOrEmpty
-    }
-}
-
-Describe "Orchestrator + reviewer launch with transcript saving on" {
-    It "<_> clears CLAUDE_CODE_CHILD_SESSION and forces session persistence" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1') {
-        $body = Get-Content (Join-Path $script:ScriptsDir "dispatch\$_") -Raw
-        $body | Should -Match '\$env:CLAUDE_CODE_CHILD_SESSION=\$null'
-        $body | Should -Match "\`$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=''1''"
     }
 }
 
@@ -305,24 +274,6 @@ Describe "restore-session.ps1 (crash recovery)" {
     It "passes -NoNudge through when -Idle is set" {
         $script:RestoreBody | Should -Match '\[switch\]\$Idle'
         $script:RestoreBody | Should -Match "if \(\`$Idle\) \{ \`$dispatchArgs \+= '-NoNudge'"
-    }
-}
-
-Describe "start-orchestrator.ps1 auto-launches the reviewer" {
-    It "has a -NoReviewer opt-out switch" {
-        $body = Get-Content $script:OrchScript -Raw
-        $body | Should -Match '\[switch\]\$NoReviewer'
-    }
-
-    It "invokes start-reviewer.ps1 unless opted out" {
-        $body = Get-Content $script:OrchScript -Raw
-        $body | Should -Match 'start-reviewer.ps1'
-        $body | Should -Match 'if \(-not \$NoReviewer\)'
-    }
-
-    It "excludes the reviewer infra worktrees from the batch" {
-        $body = Get-Content $script:OrchScript -Raw
-        $body | Should -Match 'review-checkout'
     }
 }
 
@@ -415,7 +366,7 @@ Describe "Spec -> issues: plan never invents, and the spec reaches the worker" {
     }
 }
 
-Describe "Overseer launch: boot handshake + same plugin copy (found by dogfooding)" {
+Describe "Worker launch: boot handshake + same plugin copy (found by dogfooding)" {
     BeforeAll { . (Join-Path $PSScriptRoot "..\scripts\lib\_session-config.ps1") }
 
     It "a pane stuck on the folder-trust screen is 'dialog', not running (captured live)" {
@@ -431,13 +382,13 @@ Describe "Overseer launch: boot handshake + same plugin copy (found by dogfoodin
         (Get-PaneState -Lines $pane).State | Should -Be "dialog"
     }
 
-    It "<_> waits on the shared boot handshake instead of a blind sleep" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1', 'psmux-dispatch.ps1') {
+    It "<_> waits on the shared boot handshake instead of a blind sleep" -ForEach @('psmux-dispatch.ps1') {
         $body = Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw
         $body | Should -Match 'Wait-CliReady -Target'
         $body | Should -Not -Match 'Start-Sleep -Seconds 8'
     }
 
-    It "<_> launches Claude with --plugin-dir of its own plugin copy" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1', 'psmux-dispatch.ps1', 'dispatch-worktree.ps1') {
+    It "<_> launches Claude with --plugin-dir of its own plugin copy" -ForEach @('psmux-dispatch.ps1', 'dispatch-worktree.ps1') {
         (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'Get-PluginDirArg'
     }
 
@@ -483,15 +434,11 @@ Describe "Boot handshake answers first-run screens by navigation (captured live)
 }
 
 Describe "Messages are sent through the verified path, not a bare send-keys + Enter (found by dogfooding)" {
-    It "<_> submits with C-m" -ForEach @('psmux-dispatch.ps1', 'send-to-worker.ps1', 'start-orchestrator.ps1', 'start-reviewer.ps1') {
+    It "<_> submits with C-m" -ForEach @('psmux-dispatch.ps1', 'send-to-worker.ps1') {
         # A single blind submit left every brief in a live launch sitting unsent.
         $offenders = Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") |
             Where-Object { $_ -match '^\s*(if \(.*\) \{ )?psmux send-keys .*\bEnter\b' }
         $offenders -join "`n" | Should -BeNullOrEmpty
-    }
-
-    It "the overseers nudge workers through send-to-worker.ps1" -ForEach @('start-orchestrator.ps1', 'start-reviewer.ps1') {
-        (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'send-to-worker\.ps1'
     }
 
     It "no skill tells anyone to nudge with a bare send-keys ... Enter" {
@@ -530,7 +477,7 @@ Describe "Send-PaneMessage: see the text, submit, retry until it leaves the box 
         Get-InputBoxText -Lines @("no box here") | Should -BeNullOrEmpty
     }
 
-    It "<_> sends its brief through Send-PaneMessage" -ForEach @('psmux-dispatch.ps1', 'start-orchestrator.ps1', 'start-reviewer.ps1', 'send-to-worker.ps1') {
+    It "<_> sends its brief through Send-PaneMessage" -ForEach @('psmux-dispatch.ps1', 'send-to-worker.ps1') {
         (Get-Content (Join-Path $PSScriptRoot "..\scripts\dispatch\$_") -Raw) | Should -Match 'Send-PaneMessage -Target'
     }
 }
@@ -574,11 +521,8 @@ Describe "GitHub: gh for issues/PRs, the GitHub Projects MCP for the board" {
         }
     }
 
-    It "the conductor is the board's only writer, and the overseers are told not to write it" {
+    It "the conductor is the board's only writer (and the orchestrator is the conductor's own session)" {
         $script:Board | Should -Match 'only the \*\*conductor\*\* changes the board'
-        foreach ($s in 'orchestrate', 'review') {
-            (Get-Content (Join-Path $script:SkillsDir "$s\SKILL.md") -Raw) | Should -Match 'Change the project board'
-        }
     }
 
     It "the conductor may call the board tools without a permission prompt" {
@@ -651,5 +595,61 @@ Describe "Board taxonomy: AI classifies, Module is the one field, trackers for b
     It "the issue header is 'Mode:', and old 'Work type:' issues still dispatch correctly" {
         (Get-IssueBriefHints -Body "Spec: specs/a.md`nMode: feature").Mode | Should -Be 'feature'
         (Get-IssueBriefHints -Body "Spec: specs/a.md`nWork type: iteration").Mode | Should -Be 'iteration'
+    }
+}
+
+
+Describe "Orchestrate: monitor, browser review with playwright-cli, dev-lifecycle checks, corrections" {
+    BeforeAll {
+        $o = Join-Path $PSScriptRoot "..\skills\orchestrate"
+        $script:OSkill  = Get-Content (Join-Path $o "SKILL.md") -Raw
+        $script:ORef    = Get-Content (Join-Path $o "reference\commands-orchestrate.md") -Raw
+        $script:OReview = Get-Content (Join-Path $o "reference\browser-review.md") -Raw
+    }
+
+    It "start makes one task per worker from its issue's checklist, then starts the loop" {
+        $script:ORef | Should -Match 'One task per worker'
+        $script:ORef | Should -Match 'TaskCreate'
+        $script:ORef | Should -Match '/loop 10m /crew:orchestrate poll'
+    }
+
+    It "the loop stops when the batch is done" {
+        $script:ORef | Should -Match 'Stop when done'
+        $script:OSkill | Should -Match 'stop the loop when the batch is done'
+    }
+
+    It "each poll reviews ONE branch" {
+        $script:ORef | Should -Match 'Review the next branch \(ONE per poll\)'
+    }
+
+    It "the browser review uses playwright-cli headed, not Claude in Chrome, one named session per worker" {
+        $script:OReview | Should -Match 'playwright-cli -s=<name> open \{url\} --headed'
+        $script:OReview | Should -Match 'never Claude in Chrome'
+    }
+
+    It "the browser review checks <_>" -ForEach @('resize 390 844', 'console', 'network', 'document.links', 'click', 'DESIGN.md') {
+        $script:OReview | Should -Match ([regex]::Escape($_))
+    }
+
+    It "the review runs the dev-lifecycle skills and /code-review (review is folded in)" {
+        $script:OReview | Should -Match 'dev-lifecycle:verify'
+        $script:OReview | Should -Match 'dev-lifecycle:page-web'
+        $script:OReview | Should -Match 'dev-lifecycle:page-app'
+        $script:OReview | Should -Match '/code-review'
+    }
+
+    It "findings go back into the worker's window and onto the PR; boxes are ticked only with evidence" {
+        $script:OReview | Should -Match 'send-to-worker\.ps1'
+        $script:OReview | Should -Match 'gh pr review <n> --request-changes'
+        $script:OSkill  | Should -Match 'Tick issue/PR checklist boxes only with evidence'
+    }
+
+    It "the branch runs from the worker's worktree beside the user's servers (-AutoPort), never the main checkout" {
+        $script:OReview | Should -Match '-AutoPort -Dir "<wt>/<name>"'
+        $script:OReview | Should -Match 'never the main checkout'
+    }
+
+    It "integrate merges only on the user's word" {
+        $script:ORef | Should -Match "On the user's word only"
     }
 }

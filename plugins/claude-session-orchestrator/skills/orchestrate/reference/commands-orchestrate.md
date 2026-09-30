@@ -1,265 +1,143 @@
-# Orchestrate Command — Unified Workflow Loop
+# Orchestrate: the protocol
 
-> Paths/session/repo/branch come from `.claude/session-plugin.json` — substitute `<repo>`, `<wt>`, `<sess>`, `<gh>`, `<base>`.
+> Substitute `<repo>`, `<wt>`, `<sess>`, `<gh>`, `<base>` from `status/resolve-config.ps1`.
 
-**YOU ARE THE ORCHESTRATOR.** Run only from the dedicated orchestrator Claude spawned by
-`dispatch/start-orchestrator.ps1` into `<sess>:orchestrator`, in its own detached worktree at
-`<wt>/orchestrator`, NOT the main repo at `<repo>`. The user's own session is the
-**conductor**; dispatching, merging, pulling and tearing down are its jobs, in `/crew:session`.
-
-Sub-commands: `/crew:orchestrate [poll|monitor <name>|verify <name>|verify-all]`
-
----
-
-## THE CONTRACTS (do NOT violate — these are load-bearing)
-
-These six rules are the whole reason the orchestrator is safe to run autonomously. Every
-sub-command below is written to honor them. Read them first.
-
-1. **No auto-merge.** The orchestrator **NEVER** runs `gh pr merge`. It reports green PRs as
-   `READY FOR USER REVIEW`. The user authorizes every merge through their conversational Claude
-   ("merge it"). There is no exception, no "CI is green so I'll merge" shortcut.
-
-2. **Batch-scoping.** "This batch" = PRs whose head branch matches an **ACTIVE git worktree
-   under `<wt>/`**, excluding the infra worktrees (`<wt>/orchestrator`, `<wt>/reviewer`,
-   `<wt>/review-checkout`). To compute the batch on every poll:
-   - `git -C <repo> worktree list --porcelain` → all active worktrees + their branches (parse each `branch refs/heads/<name>` line).
-   - **Skip** the infra worktrees: `<wt>/orchestrator`, `<wt>/reviewer`, `<wt>/review-checkout` (detached HEAD, no branch line — these are the orchestrator + reviewer, not workers).
-   - `gh pr list --repo <gh> --state open --json number,title,headRefName,statusCheckRollup,mergeable` → all open PRs.
-   - **Filter:** keep ONLY PRs whose `headRefName` matches one of the active worktree branches.
-
-   PRs whose worktrees were already torn down are OUTSIDE scope. PRs from previous sessions,
-   the user's own work, and any branch without a live worktree under `<wt>/` are NOT in the
-   batch. Do NOT report them, do NOT consider merging them, do NOT include them in status.
-
-3. **Do NOT auto-tear-down. Keep workers alive.** A merged PR does NOT make a worker disposable —
-   the user keeps it alive to iterate (tell the worker to fix → push → re-review, or work the
-   checked-out branch) or to give it more tasks, and the work is already on the remote regardless.
-   Teardown is the **conductor's** job (`teardown/close-worker.ps1`, junction-first), done
-   **ONLY** when the USER explicitly says that worker is done. The orchestrator never tears
-   anything down.
-
-4. **Self-terminate.** End the loop when there are **no live worker windows AND no open PRs from
-   this batch**. Print a summary, exit the loop, exit Claude.
-
-5. **Never touch the main repo's working state.** The orchestrator **NEVER** runs
-   `git checkout` against `<repo>`, **NEVER** runs `git pull origin <base>` in `<repo>`, and
-   **NEVER** modifies or commits in its own worktree. Read-only git is fine
-   (`git -C <abs-path> fetch`, `git -C <abs-path> status`, `git -C <repo> worktree list`).
-
-6. **`/loop` is the cron.** Polling is driven by `/loop <interval> /crew:orchestrate poll`.
-   Never use Windows scheduled tasks or PowerShell `Start-Sleep` polling loops. The PS scripts'
-   job ends after launching Claude; the recurring cadence is `/loop`.
-
----
-
-## The Workflow (How Everything Fits Together)
+You run this **in the user's own session**. The workers are psmux windows; you are not. There is
+no orchestrator window and no reviewer window. Watching, reviewing and steering are all yours.
 
 ```
-DISPATCH → MONITOR/SEND → POLL PRs → REPORT READY → (USER MERGES) → WORKER STAYS ALIVE
-(conductor)  (you)          (you)       (you)          (conductor)      until the user says done
-   │            │              │            │              │
-   │            │              │            │              └─ user says "merge it" to the conductor
-   │            │              │            └─ flag green batch PRs as READY FOR USER REVIEW
-   │            │              └─ gh pr list + CI status, filtered to the batch
-   │            └─ psmux capture-pane + psmux send-keys
-   └─ psmux-dispatch.ps1 (worktree + psmux window + Claude worker)
-```
-
-### Full Loop (when `orchestrate poll` runs):
-
-1. **Compute the batch** (see Contract 2) — active worktree branches ∩ open PRs.
-2. **Read agent terminals** — what is each live worker doing right now?
-3. **Send messages** — nudge stuck agents, tell done agents to test + create PRs.
-4. **Check open PRs (batch-scoped)** — which have passing CI?
-5. **Report green PRs as READY FOR USER REVIEW** — never merge (Contract 1).
-6. **Merged PRs** — report any batch PR the user merged as `MERGED`. Do NOT tear its worker down (Contract 3).
-7. **Self-terminate check** — no live workers AND no open batch PRs → summarize and exit (Contract 4).
-8. **Report** — compact summary of what happened this poll.
-
----
-
-## `orchestrate poll`
-
-**THE MAIN LOOP.** Compute the batch, monitor agents, send messages, report green PRs as
-READY FOR USER REVIEW, report user-merged PRs. **No merging, no teardown.**
-
-### Phase 1: Compute the batch (Contract 2)
-
-```bash
-git -C <repo> worktree list --porcelain
-gh pr list --repo <gh> --state open --base <base> --json number,title,headRefName,statusCheckRollup,mergeable
-```
-Keep only PRs whose `headRefName` matches an active worktree branch (excluding `orchestrator`).
-Everything else is out of scope for this poll.
-
-### Phase 2: Read Panes & Send Messages
-
-1. List live workers:
-   ```
-   psmux list-windows -t <sess>
-   ```
-   Skip the infra windows: `orchestrator` and `reviewer`.
-
-   **Headless build-ahead workers** (dispatched via `dispatch-codex.ps1`) are background
-   processes, NOT psmux windows — `capture-pane` cannot see them. Enumerate them
-   separately and fold them into the report + the self-terminate check:
-   ```
-   pwsh -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-headless-workers.ps1" -Config "<repo>/.claude/session-plugin.json" -Json
-   ```
-   Each row reports `State` (RUNNING/COMPLETE/BLOCKED/EXITED) + `PR`. You cannot nudge a
-   headless worker (no pane); if one is `BLOCKED` or `EXITED`, report it and let the user
-   decide (re-dispatch / inspect its `Log`). A `COMPLETE` row with a PR feeds the same
-   "READY FOR USER REVIEW" path as a psmux worker's PR.
-2. For each worker window:
-   ```
-   psmux capture-pane -t <sess>:<name> -p
-   ```
-3. Analyze pane content and decide action:
-
-   | Terminal Shows | Action |
-   |---------------|--------|
-   | "accept edits on" / waiting for input | Send `y` / acceptance |
-   | Error messages / build failures | Send fix instructions |
-   | `WORKTREE_STATUS: COMPLETE` / PR created / idle | No action needed |
-   | `WORKTREE_STATUS: BLOCKED` + reason | Report the reason, stop nudging this worker |
-   | Agent asking a question | Answer from the task brief in `.claude-bootstrap.md` and any spec it points to |
-   | No progress for 2+ polls | Send nudge |
-   | Done but no PR | Send: test + commit + push + PR command (project test commands from `config.layout`) |
-
-4. Send via:
-   ```
-   pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "<message>" -Config "<repo>/.claude/session-plugin.json"
-   ```
-   (See [commands-monitor.md](commands-monitor.md) for the message templates.)
-
-### Phase 3: Report PR status — NEVER merge (Contract 1)
-
-For each batch PR:
-- **All checks passing + mergeable** → report it as `READY FOR USER REVIEW` with its number and URL. **Do NOT run `gh pr merge`.** The user authorizes the merge through their conversational Claude.
-- **CI failing** → report it and nudge the owning worker to fix (the worker rebases/fixes in its own worktree; the orchestrator does NOT touch git in `<repo>` — Contract 5).
-- **CI still running** → note it; the next poll will catch it.
-
-### Phase 4: Verify Work (optional — the reviewer does the deep pass)
-
-> The **reviewer** (`/crew:review`, spawned by `start-reviewer.ps1` alongside this
-> orchestrator) does the real pre-merge verification: it checks each green PR out in its
-> own `review-checkout` worktree, runs the project tests + `/code-review`, and labels it
-> `READY-VERIFIED`. The orchestrator's verify below is a *shallow* deliverable-existence
-> check; leave the deep gate to the reviewer and don't duplicate it. See
-> [commands-review.md](../../review/reference/commands-review.md).
-
-For batch PRs, optionally verify the agent built what the brief asked:
-1. Read the task brief (`.claude-bootstrap.md`) and any spec it points to — extract key deliverables.
-2. Check each deliverable exists in the PR diff:
-   ```
-   gh pr diff <number> --name-only
-   ```
-3. Flag missing deliverables in the report (and optionally nudge the worker if it's still live).
-
-### Phase 5: Review routing — tell the user HOW to review each green PR (Contracts 3 + 11)
-
-Do **NOT** auto-tear-down merged workers — keep them alive (Contract 3). Instead, for each green
-batch PR, classify it by lane and tell the user how to review it:
-```bash
-gh pr diff <n> --name-only          # compare paths against config.teams ownsPaths
-```
-- **Frontend-only** (every changed path in the frontend lane) → report "review on the Vercel
-  preview" with the PR/preview URL. No local checkout.
-- **Backend / full-stack** (any backend-lane path) → report it **needs a local run**, so the
-  user can exercise it on their machine (a preview can't exercise backend). Bringing it local is
-  the conductor's job (`/crew:session local <name>`); just say which PRs need it.
-
-### Phase 6: Self-terminate check (Contract 4)
-
-If there are **no live worker windows, no RUNNING headless workers (check-headless-workers.ps1),
-AND no open batch PRs**, print a final summary, exit the `/loop`, and exit Claude. Otherwise
-continue. (Headless workers count as "live" while RUNNING — do not self-terminate out from under
-a Codex worker that is still building.)
-
-### Phase 7: Report
-
-Print a compact summary:
-```
-POLL RESULTS
-============
-Ready for review:  #26 f008-quiz (CI green), #25 f021-referral (CI green)
-Agents:            f008-quiz (idle, done), f045-progress (building)
-Sent:              f045-progress ← "status check" nudge
-Merged:            f008-quiz (#26, merged by user; worker kept alive)
-Blocked:           none
-Out of scope:      (ignored — not in this batch)
+DISPATCH ──► MONITOR (loop) ──► BROWSER REVIEW, one branch at a time ──► FINDINGS to worker ──┐
+(/crew:session)   health, panes, PRs     playwright-cli + dev-lifecycle checks    + PR comment     │
+                                                                                                   │
+        ◄───────────────────────── worker fixes, pushes ◄──────────────────────────────────────────┘
+REVIEWED + GREEN ──► user says "merge" / "pull it all in" ──► INTEGRATE into <base> ──► page-by-page review there
 ```
 
 ---
 
-## `orchestrate verify <name>`
+## `start`
 
-Check built code against the brief's requirements.
-
-### Steps
-
-1. Read the task brief (`<wt>/<name>/.claude-bootstrap.md`) and any spec it points to.
-2. Extract the deliverables list.
-3. For each deliverable, verify file existence and feature checks (the project test commands from `config.layout` cover typecheck/build).
-4. Display the scorecard:
+1. **The batch.** `git -C <repo> worktree list --porcelain` for the worker worktrees under `<wt>/`,
+   and `gh pr list --repo <gh> --state open --json number,title,headRefName,statusCheckRollup`
+   for their PRs. The batch is the worker branches; nothing else is in scope.
+2. **One task per worker** (`TaskCreate`). Subject: `<worker> — #<issue> <title>`. Put the issue's
+   own checklist into it: `gh issue view <n> --repo <gh> --json body` and take its checkbox lines
+   (acceptance criteria, the page order's gates). This list is what you check the work against,
+   and what you tick off on the issue as it's proved. Mark a task `in_progress` while its worker
+   builds, and `completed` only when every box is ticked with evidence.
+3. **Start the monitor loop:**
    ```
-   VERIFICATION: f008-quiz
-   ===============================
-   [PASS] Quiz assembly component
-   [PASS] Question bank API
-   [FAIL] Timer integration — not found
-   [PASS] Typecheck passes
-   Score: 3/4
+   /loop 10m /crew:orchestrate poll
    ```
-5. If the agent is still running → send the missing items as a `send-keys` nudge.
+   Ten minutes is the default; the user may ask for another cadence. The loop is the schedule:
+   no scheduled tasks, no `Start-Sleep`.
+4. Tell the user what you're watching: one line per worker, with its issue and PR.
 
 ---
 
-## `orchestrate verify-all`
+## `poll` (the loop body)
 
-Run verify for ALL active batch worktrees / open batch PRs.
+Do these in order, and keep the report short.
 
-Display a matrix:
+### 1. Health: is every worker up?
+
 ```
-VERIFICATION MATRIX
-===================
-Feature              Types  Build  Deliverables  Score
-─────────────────    ─────  ─────  ────────────  ─────
-f008-quiz            PASS   PASS   3/4           75%
-f021-referral        PASS   PASS   5/5           100%
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-crew-health.ps1" -Config "<repo>/.claude/session-plugin.json" -Json
 ```
+
+| State | Do |
+|---|---|
+| `running` | nothing, unless its `PaneHash` hasn't changed for two polls and it hasn't finished: then read the pane and nudge |
+| `pending` | unsent text is blocking it; submit it (`psmux send-keys -t <sess>:<name> C-m`) if it's clearly intended, else clear it (`C-u`) |
+| `dialog` | a first-run menu: `Down` until `❯` is on the Yes option, then `Enter`, then resend its brief line with `send-to-worker.ps1` |
+| `exited` / `missing` | tell the user, and offer `/crew:session resume <name>` |
+
+### 2. Progress: what is each worker doing?
+
+`psmux capture-pane -t <sess>:<name> -p -S -40` for each worker. Nudge with
+`send-to-worker.ps1` when a worker is stuck, erroring, asking a question its brief answers, or
+done without a PR. Templates: [commands-monitor.md](commands-monitor.md). One clear instruction,
+never a vague "status?".
+
+### 3. PRs: what changed?
+
+`gh pr list --repo <gh> --state open --json number,headRefName,headRefOid,statusCheckRollup,mergeable`.
+Note per worker: PR opened, new commits since you last reviewed (`headRefOid` changed), CI red,
+or `mergeable` gone `CONFLICTING`. CI red or conflicting → tell the worker exactly that (for a
+conflict: rebase onto `origin/<base>` and push).
+
+### 4. Review the next branch (ONE per poll)
+
+Pick **one** worker whose branch is ready and not yet reviewed at its current commit. Ready means
+a PR exists, or the worker reports it's done. Prefer the one that has waited longest, and put a
+PR whose files overlap another's after the one it overlaps. Then run the full browser review:
+[browser-review.md](browser-review.md).
+
+One branch per poll keeps the browser and the dev servers to one at a time, and each review
+thorough. The next poll takes the next branch.
+
+### 5. Keep the record true
+
+- Tick the issue/PR checkboxes you proved in this review (evidence in the comment).
+- Update the worker's task: its checklist items, and its status.
+- The board, if configured: move items per the conductor's board protocol
+  ([commands-board.md](../../session/reference/commands-board.md)).
+
+### 6. Report
+
+```
+POLL 14:20
+  health      4 running, 1 pending (fixed: submitted its brief)
+  reviewed    #73 jobs-filters: 3 findings → sent to worker, PR commented
+  waiting     #74 (new commits, next), #76 (CI running)
+  verified    #71 (all boxes ticked; ready for your merge)
+  stuck       none
+```
+
+### 7. Stop when done
+
+The batch is done when every worker's PR is merged or closed, or the user says so. Then stop the
+loop, mark the remaining tasks, and give the user a final summary: what merged, what's open, and
+which issues still have unticked boxes.
 
 ---
 
-## Commands Reference (psmux + scripts)
+## `integrate`: "pull it all in"
 
-| Command / Script | Purpose |
-|--------|---------|
-| `psmux list-windows -t <sess>` | List live worker windows |
-| `psmux capture-pane -t <sess>:<name> -p` | Read a worker's pane (no focus steal) |
-| `pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch/send-to-worker.ps1" -Name <name> -Message "<msg>" -Config "<repo>/.claude/session-plugin.json"` | Send a message / nudge |
-| `status/check-worktree-health.ps1` | Health check (git, deps, env). `-Name <n>` or `-All` |
-| `status/check-headless-workers.ps1` | State + PR of each headless (Codex) worker. `-Json` |
+On the user's word only. They want to see all the work together, on their machine.
 
-Dispatch and teardown scripts are deliberately not listed: they are the conductor's.
+1. Take the PRs you've reviewed and that are green. Order them by file overlap: disjoint PRs in
+   any order, overlapping ones sequenced.
+2. Merge each into `<base>`: `gh pr merge <n> --repo <gh> --squash`, or the project's own merge
+   method from its CLAUDE.md. Re-check `mergeable` after every merge; a PR that turns
+   `CONFLICTING` goes back to its worker to rebase.
+3. Pull `<base>` into the main checkout (`/crew:session pull`), start its dev server on the
+   project's port, and tell the user the URL.
+4. **Review there, page by page**: the browser review against the integrated branch, one page at a
+   time, checking links across pages as well as within them. Findings go back to the worker that
+   owns the page, or into a new issue when that worker is gone.
+5. Workers stay alive after merge. Teardown is the user's call (`/crew:session done`).
 
 ---
 
-## Using with /loop
+## `review <worker>`
 
-The orchestrator's poll cadence IS `/loop` (Contract 6). The dedicated orchestrator Claude
-(spawned by `start-orchestrator.ps1`) starts it itself:
-```
-/loop 5m /crew:orchestrate poll
-```
+The browser review of one worker's branch, now, outside the loop:
+[browser-review.md](browser-review.md).
 
-Each tick:
-- Computes the batch (Contract 2).
-- Reads and nudges live workers.
-- Reports green batch PRs as READY FOR USER REVIEW (never merges — Contract 1).
-- Reports PRs the user has merged, and keeps their workers alive (Contract 3).
-- Self-terminates when no workers and no open batch PRs remain (Contract 4).
+## `stop`
 
-The loop is session-only — it dies when Claude exits. Never replace it with a scheduled task
-or a `Start-Sleep` loop.
+End the loop and report where everything stands.
+
+---
+
+## Scripts and tools
+
+| Tool | Use |
+|---|---|
+| `status/check-crew-health.ps1 -Json` | every worker's state: running / pending / dialog / exited / missing |
+| `psmux capture-pane -t <sess>:<name> -p -S -40` | read a worker's pane |
+| `dispatch/send-to-worker.ps1 -Name <name> -Message "<one line>"` | tell a worker something, verified submitted |
+| `server/dev-server.ps1` / `backend-server.ps1 -AutoPort -Dir <wt>/<name>` | run a worker's branch beside the user's own servers |
+| `playwright-cli` | the browser (see browser-review.md) |
+| `gh issue view`, `gh pr view/diff/comment/review/edit` | the issue's checklist and the PR record |
