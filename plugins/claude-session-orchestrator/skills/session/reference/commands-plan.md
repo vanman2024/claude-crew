@@ -93,6 +93,7 @@ them exactly like this:
 Spec: specs/intake.md
 Spec section: §4 Form
 Mode: feature
+Skill: dev-lifecycle:page-web
 Lane: frontend
 Wave: 2
 Depends on: #<n of piece 2>
@@ -115,6 +116,12 @@ Part of #<epic>
 
 - `Mode: feature` for new pieces; `iteration` for a change to something that exists.
   The dispatcher briefs a `feature` worker to read the whole spec and build to it.
+- `Skill:` only when a skill owns the whole build. A page is the main case:
+  `dev-lifecycle:page-web` for a public page (landing, marketing, SEO pages),
+  `dev-lifecycle:page-app` for a signed-in app screen. The worker's brief then opens with that
+  skill as its first action and drops the generic plan/lane steps; the orchestrator checks the
+  transcript for the call. Leave the line out for ordinary code work. A project can instead set
+  a default in `workerSkills` (see session-init); an issue's own `Skill:` line wins over it.
 - Five pieces or more: create a **tracker** first (`[Tracker] <spec title>`, listing the waves),
   make each piece a real **sub-issue** of it, and give it its own board tab filtered to it
   (see [commands-board.md](commands-board.md), "Trackers"). Smaller plans skip the tracker.

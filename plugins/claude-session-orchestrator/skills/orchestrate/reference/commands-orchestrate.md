@@ -59,6 +59,24 @@ pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-crew-health.ps
 done without a PR. Templates: [commands-monitor.md](commands-monitor.md). One clear instruction,
 never a vague "status?".
 
+**Is it running its skill?** A worker whose brief opens with `## 0. Your skill: /<skill>` (a
+`Page:` issue gets `dev-lifecycle:page-web` or `dev-lifecycle:page-app`) must invoke that skill
+first and follow it. Check the transcript, not the worker's own report:
+
+```
+pwsh -NoProfile -File "${CLAUDE_PLUGIN_ROOT}/scripts/status/check-worker-skills.ps1" -Config "<repo>/.claude/session-plugin.json"
+```
+
+`MISSING: <skill>` on a worker that has started building → stop it now, before more work piles
+up on the wrong process: `send-to-worker.ps1` with "Stop. Invoke /<skill> with the Skill tool
+and follow it from the step you have not done; keep what you built that the skill's steps
+confirm." Check again next poll. It also lists every skill and agent the worker did call: a
+step the skill names with no call behind it is not done, whatever the pane says.
+
+**Parked at a gate?** `WORKTREE_STATUS: WAITING` means the skill stopped for the person (a
+review board, a section canvas). Show the user the `LINK` and the `ASK`, and send their pick
+back with `send-to-worker.ps1`. Never pick for them.
+
 ### 3. PRs: what changed?
 
 `gh pr list --repo <gh> --state open --json number,headRefName,headRefOid,statusCheckRollup,mergeable`.
@@ -91,6 +109,8 @@ POLL 14:20
   reviewed    #73 jobs-filters: 3 findings → sent to worker, PR commented
   waiting     #74 (new commits, next), #76 (CI running)
   verified    #71 (all boxes ticked; ready for your merge)
+  skills      #75 MISSING dev-lifecycle:page-web → told to start it
+  gate        #72 review board waiting on you: <link>
   stuck       none
 ```
 
@@ -136,6 +156,7 @@ End the loop and report where everything stands.
 | Tool | Use |
 |---|---|
 | `status/check-crew-health.ps1 -Json` | every worker's state: running / pending / dialog / exited / missing |
+| `status/check-worker-skills.ps1 [-Name <w>] [-Required a,b] [-Json]` | from the transcripts: did each worker invoke its brief's skill, and which skills and agents it called |
 | `psmux capture-pane -t <sess>:<name> -p -S -40` | read a worker's pane |
 | `dispatch/send-to-worker.ps1 -Name <name> -Message "<one line>"` | tell a worker something, verified submitted |
 | `server/dev-server.ps1` / `backend-server.ps1 -AutoPort -Dir <wt>/<name>` | run a worker's branch beside the user's own servers |

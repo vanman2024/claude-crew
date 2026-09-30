@@ -440,9 +440,10 @@ function Format-DocsSection {
 # ITERATION with no spec, which is wrong for a new piece of a spec: the worker would
 # be told to change existing code only and would never read the spec. Accepts the
 # lines plain or bolded ("**Spec:**"). Returns $null for anything absent.
+#   Skill: dev-lifecycle:page-web  -> the skill that drives the whole build (-Skill)
 function Get-IssueBriefHints {
     param([string]$Body)
-    $hints = [pscustomobject]@{ Spec = $null; Mode = $null }
+    $hints = [pscustomobject]@{ Spec = $null; Mode = $null; Skill = $null }
     if (-not $Body) { return $hints }
     foreach ($line in ($Body -split '\r?\n')) {
         if (-not $hints.Spec -and $line -match '^\s*\*{0,2}Spec:\*{0,2}\s*`?([^\s`]+\.(md|mdx|txt|ya?ml|json))`?') {
@@ -451,8 +452,65 @@ function Get-IssueBriefHints {
         if (-not $hints.Mode -and $line -match '^\s*\*{0,2}(Mode|Work type):\*{0,2}\s*(feature|iteration)\b') {
             $hints.Mode = $Matches[2].ToLower()
         }
+        if (-not $hints.Skill -and $line -match '^\s*\*{0,2}Skill:\*{0,2}\s*`?/?([A-Za-z0-9][\w.-]*(:[\w.-]+)?)`?') {
+            $hints.Skill = $Matches[1]
+        }
     }
     return $hints
+}
+
+# Which skill drives this worker. The issue's own `Skill:` line wins; otherwise the
+# first config.workerSkills rule that matches the title (regex) or a label:
+#   "workerSkills": [
+#     { "titleMatch": "^Page:", "skill": "dev-lifecycle:page-web" },
+#     { "label": "app-screen",  "skill": "dev-lifecycle:page-app" }
+#   ]
+# Returns $null when nothing matches: the brief then carries the generic process.
+function Resolve-WorkerSkill {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [string]$Title,
+        [string[]]$Labels = @(),
+        [string]$IssueSkill
+    )
+    if ($IssueSkill) { return ($IssueSkill -replace '^/', '') }
+    if (-not $Config.PSObject.Properties['workerSkills'] -or -not $Config.workerSkills) { return $null }
+    foreach ($rule in @($Config.workerSkills)) {
+        if (-not $rule.PSObject.Properties['skill'] -or -not $rule.skill) { continue }
+        $hit = $false
+        if ($rule.PSObject.Properties['titleMatch'] -and $rule.titleMatch -and $Title) {
+            if ($Title -match [string]$rule.titleMatch) { $hit = $true }
+        }
+        if (-not $hit -and $rule.PSObject.Properties['label'] -and $rule.label) {
+            if (@($Labels) -contains [string]$rule.label) { $hit = $true }
+        }
+        if ($hit) { return ([string]$rule.skill -replace '^/', '') }
+    }
+    return $null
+}
+
+# Section 0 when a skill drives the worker. The skill IS the process: the brief's own
+# plan/data-flow/lane steps are left out so the worker is not handed two processes
+# (the mechanicjobs page workers were, and ran neither; 0 of 11 invoked page-web).
+# The page skills stop at gates where the person decides; a crew worker has no person
+# in its pane, so it parks there and the orchestrator relays the pick.
+function Format-SkillSection {
+    param(
+        [Parameter(Mandatory)][string]$Skill,
+        [string]$Title,
+        [int]$IssueNumber
+    )
+    $arg = if ($Title) { $Title -replace '^\s*Page:\s*', '' } else { '<this task>' }
+    $issueRef = if ($IssueNumber) { "#$IssueNumber" } else { 'this task' }
+    return @"
+## 0. Your skill: ``/$Skill`` (your FIRST action)
+This task is driven by a skill. **Invoke it with the Skill tool before anything else** (``skill: "$Skill"``, args: ``$arg``) and follow it step by step. The skill is your process: its steps, its order, the skills and agents it names. Do not substitute your own plan for it, do not skip a step because it looks optional, and do not "cover" a step by doing something similar yourself.
+
+- **Already done for you:** the issue ($issueRef) exists and this worktree and branch are made. Where the skill says to create the issue, branch or worktree, link what exists and go on.
+- **Every skill or agent the skill names is invoked** with the Skill / Task tool, not reproduced from memory. The orchestrator reads your transcript for those calls; a step with no call counts as not done.
+- **Gates:** where the skill stops for the person to choose (a review board, a canvas, a pick between options), publish what it asks for, then output the WAITING signal from section 7 and stop. Do not pick for the person and do not build past the gate. The person's choice comes back into this pane.
+- If the skill is not installed here, output ``WORKTREE_STATUS: BLOCKED`` with ``REASON: skill $Skill unavailable`` and stop. Do not improvise the process.
+"@
 }
 
 function New-WorkerBrief {
@@ -465,40 +523,62 @@ function New-WorkerBrief {
         [string]$Title,
         [ValidateSet('feature', 'iteration')][string]$Mode,
         [string]$Spec,
+        [string]$Skill,
         [string]$WorkerCli = 'claude'
     )
 
-    $teams    = Format-TeamsSection -Config $Config -WorkerCli $WorkerCli
-    $dataflow = Format-DataFlowSection -Config $Config
     $tests    = Format-TestSection -Config $Config
     $browserVerify = Format-BrowserVerifySection -Config $Config
     $docsSection   = Format-DocsSection -Config $Config
     $base  = $Config.defaultBranch
     $repo  = $Config.githubRepo
+    $hasIssue = $PSBoundParameters.ContainsKey('IssueNumber') -and $IssueNumber
 
     $closes = ""
-    if ($PSBoundParameters.ContainsKey('IssueNumber') -and $IssueNumber) {
-        $closes = " Closes #$IssueNumber"
-    }
+    if ($hasIssue) { $closes = " Closes #$IssueNumber" }
     $titleLine = if ($Title) { "**Task:** $Title`n" } else { "" }
 
-    # Exactly two work types. Default: an issue-backed brief is an iteration; a plain
-    # task brief is a new feature. Caller can override with -Mode.
-    if (-not $Mode) {
-        $Mode = if ($PSBoundParameters.ContainsKey('IssueNumber') -and $IssueNumber) { 'iteration' } else { 'feature' }
+    # The main checkout's ports come from the config, never assumed: a worker told
+    # "3000/8000" on a project that runs 3301 reasons about the wrong servers.
+    $fePort = 3000
+    if (($Config.PSObject.Properties.Name -contains 'devServer') -and $Config.devServer -and
+        ($Config.devServer.PSObject.Properties.Name -contains 'port') -and $Config.devServer.port) {
+        $fePort = [int]$Config.devServer.port
     }
-    $workType = Format-WorkTypeSection -Mode $Mode -Spec $Spec
+    $be = $null
+    if (Get-Command Get-WorkerBackendConfig -ErrorAction SilentlyContinue) { $be = Get-WorkerBackendConfig -Config $Config }
+    $hasBackend = [bool]($be -and $be.hasBackend)
+    $bePort = if ($be) { [int]$be.basePort } else { 8000 }
 
     # CLI-aware task-list tool name — see Get-TaskToolName for why this is not hardcoded.
     $taskTool = Get-TaskToolName -WorkerCli $WorkerCli
 
-    return @"
-# Worktree brief: $Name
+    # --- The process. A skill-driven worker gets the skill and nothing that competes
+    # with it; any other worker gets the generic process (work type, data flow, plan,
+    # lanes). Handing a worker both is how the page workers ended up running neither.
+    if ($Skill) {
+        $Skill = $Skill -replace '^/', ''
+        $skillIssue = if ($hasIssue) { $IssueNumber } else { 0 }
+        $skillSection = Format-SkillSection -Skill $Skill -Title $Title -IssueNumber $skillIssue
+        $specLine = if ($Spec) { "`nThe spec for this work is ``$Spec``: the skill reads it as its source of truth, and so do you.`n" } else { "" }
+        $process = @"
+$skillSection
+$specLine
+## 1. Orient
+1. Confirm location: ``git branch --show-current`` should print ``$Branch`` and ``pwd`` should be this worktree.
+2. Read ``CLAUDE.md`` (and any ``*/CLAUDE.md``) for project rules. Where it lists a page or build order, the skill above is how you run it.
+3. Your task list ($taskTool) is built from the skill's steps and the issue's checklist, one entry per step, created as the skill starts. Exactly one ``in_progress`` at a time. That list is what the orchestrator watches.
 
-You are a worker in an isolated git worktree on branch ``$Branch`` for project **$($Config.projectName)**. An orchestrator is watching this psmux pane and will steer you. You are autonomous and running with --dangerously-skip-permissions: plan first, then build straight through to a PR. Do not stop to ask for permission or approval.
+## 2. The task
 
-$titleLine
-
+$Task
+"@
+    } else {
+        if (-not $Mode) { $Mode = if ($hasIssue) { 'iteration' } else { 'feature' } }
+        $workType = Format-WorkTypeSection -Mode $Mode -Spec $Spec
+        $teams    = Format-TeamsSection -Config $Config -WorkerCli $WorkerCli
+        $dataflow = Format-DataFlowSection -Config $Config
+        $process = @"
 $workType
 
 ## 1. Orient (create your task list FIRST)
@@ -508,9 +588,9 @@ $workType
 4. Explore the relevant code before writing anything (use the Explore agent or read files directly) — with the explore task ``in_progress``.
 
 ## VERIFY the API before you build it - NEVER from memory
-Before writing code against ANY framework / library / SDK / external service (Mastra, CATS, Multilead/Skylead, Unipile, Twilio, Supabase, Vercel AI SDK, shadcn, etc.), CONSULT its authoritative reference FIRST - its MCP docs server, its skill, or its installed docs (``node_modules/<pkg>/dist/docs``, or a ``.claude/skills/<name>``). Your training knowledge of these APIs is almost certainly STALE. Do NOT guess signatures, option names, import paths, or types.
-- Look it up, THEN build to the verified API. One guessed call (e.g. passing a plain object where a ``RequestContext`` instance is required) compiles clean but breaks at runtime and is not caught until integration - which wastes the whole parallel run.
-- If the needed reference is NOT available in this environment (the MCP server is not connected, the skill is not installed, the docs are not in ``node_modules``): do NOT improvise or build it how you think it should work. Output ``BLOCKED: need <reference> to build <what>`` and STOP - report back to the orchestrator and ask for that reference. Wait for it; do not proceed on a guess.
+Before writing code against ANY framework, library, SDK or external service, CONSULT its authoritative reference FIRST: its docs MCP server, its skill, or its installed docs (``node_modules/<pkg>/dist/docs``, or a ``.claude/skills/<name>``). Your training knowledge of these APIs is almost certainly STALE. Do NOT guess signatures, option names, import paths, or types.
+- Look it up, THEN build to the verified API. One guessed call compiles clean, breaks at runtime, and is not caught until integration.
+- If the needed reference is NOT available here (the MCP server is not connected, the skill is not installed, the docs are not in ``node_modules``): output ``BLOCKED: need <reference> to build <what>`` and STOP. Do not proceed on a guess.
 
 ## 2. The task
 
@@ -532,48 +612,90 @@ You already created the seed list in step 1. As the plan firms, REFINE it into c
 There is NO phase without a current task list — exploration and planning included. "I haven't written code yet" is NOT a reason to skip it. On a long autonomous run the task list is the only thing that keeps you from dropping steps or drifting.
 
 $teams
+"@
+    }
 
-## MANDATORY: Dev server + ports — NEVER kill a process by name
-Claude Code itself, the orchestrator, the reviewer, and EVERY other worktree's dev server ALL run as ``node.exe``. A name-based or blanket kill therefore takes down the whole crew **and your own session** — this is the #1 way a worker accidentally kills everything.
+    # --- Servers. Case B only exists when the project has a backend to run.
+    $caseB = ""
+    if ($hasBackend) {
+        $caseB = @"
 
-- FORBIDDEN — never run any of these (they kill Claude Code): ``taskkill /IM node.exe``, ``taskkill /F /IM node``, ``Get-Process node | Stop-Process``, ``Stop-Process -Name node``, ``killall node``, ``pkill node``, or a blanket ``npx kill-port`` sweep across ports.
-
-### To run the app: start THROWAWAY servers on free ports
-Pick the case that matches YOUR task. In both, servers bind auto-picked FREE ports ABOVE the main ones (3001+/8001+), never the main 3000/8000, and MUST be stopped before the PR.
-
-**Case A — frontend-only change (API contract unchanged):** share the main checkout's running backend (``http://localhost:8000``). Do NOT start your own backend. Start only a throwaway frontend with ``-AutoPort``:
+**Case B — your task CHANGES the backend:** the shared :$bePort is the MAIN checkout's OLD code and can't serve your new endpoints/content, and you can't bind :$bePort. Run THIS branch's backend on its own free port, then point the frontend at it. The backend runner reuses the main venv and runs WITHOUT --reload (one process; --reload spawns children that crash/pile up):
 ``````
-# read the AUTO_PORT / URL it prints — that is the URL you open in the browser
-pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start -AutoPort -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
-# tear down when done (pass the SAME port it printed):
-pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop -Port <fe port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
-``````
-
-**Case B — your task CHANGES the backend:** the shared :8000 is the MAIN checkout's OLD code and can't serve your new endpoints/content, and you can't bind :8000. Run THIS branch's backend on its own free port, then point the frontend at it. The backend runner reuses the main venv and runs WITHOUT --reload (one process; --reload spawns children that crash/pile up):
-``````
-# 1. start the branch backend on a free port (8001, 8002, ...) — read its PORT
+# 1. start the branch backend on a free port above $bePort — read its PORT
 pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/backend-server.ps1" -Action start -AutoPort -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
-# 2. start the frontend pointed at YOUR backend (NOT shared :8000) via a runtime env override
+# 2. start the frontend pointed at YOUR backend (NOT shared :$bePort) via a runtime env override
 pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start -AutoPort -ApiUrl http://localhost:<be port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
 # ... now OPEN the frontend URL and verify (see the mandatory verification step below) ...
 # 3. tear DOWN BOTH (backend first), passing the ports they printed:
 pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/backend-server.ps1" -Action stop -Port <be port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
 pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop -Port <fe port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
 ``````
+- **Never use ``--reload`` or ``python main.py``.** ``--reload`` spawns a child that re-imports the app (crashes on Windows) and respawns endlessly; ``python main.py`` hard-binds :$bePort. The backend-server script already runs the safe single-process form — use it, don't hand-roll uvicorn.
+"@
+    }
+    $caseA = if ($hasBackend) {
+        "**Case A — frontend-only change (API contract unchanged):** share the main checkout's running backend (``http://localhost:$bePort``). Do NOT start your own backend. Start only a throwaway frontend with ``-AutoPort``:"
+    } else {
+        "Start a throwaway frontend with ``-AutoPort``:"
+    }
 
+    # --- Completion. A skill-driven worker also reports the skills it ran and can park
+    # at a gate; the orchestrator checks SKILLS_RUN against the transcript.
+    $skillsRunLine = if ($Skill) { "`nSKILLS_RUN: <each skill and agent you invoked, in order, starting with $Skill>" } else { "" }
+    $waiting = ""
+    if ($Skill) {
+        $waiting = @"
+
+At a gate the skill puts to the person (see section 0), output:
+
+``````
+WORKTREE_STATUS: WAITING
+GATE: <which gate, e.g. review board / section canvas>
+LINK: <the board, artifact or preview the person opens>
+ASK: <the one decision you need>
+``````
+Then stop and wait. The pick comes back into this pane; carry on from it.
+"@
+    }
+
+    return @"
+# Worktree brief: $Name
+
+You are a worker in an isolated git worktree on branch ``$Branch`` for project **$($Config.projectName)**. The person's own Claude session orchestrates this crew: it reads this pane, checks your branch in a browser, and sends corrections here. You are autonomous and running with --dangerously-skip-permissions: build straight through to a PR, and stop only where section 0 or section 7 says to.
+
+$titleLine
+
+$process
+
+## MANDATORY: Dev server + ports — NEVER kill a process by name
+Claude Code itself, the orchestrating session, and EVERY other worktree's dev server ALL run as ``node.exe``. A name-based or blanket kill therefore takes down the whole crew **and your own session** — this is the #1 way a worker accidentally kills everything.
+
+- FORBIDDEN — never run any of these (they kill Claude Code): ``taskkill /IM node.exe``, ``taskkill /F /IM node``, ``Get-Process node | Stop-Process``, ``Stop-Process -Name node``, ``killall node``, ``pkill node``, or a blanket ``npx kill-port`` sweep across ports.
+
+### To run the app: start THROWAWAY servers on free ports
+Servers bind auto-picked FREE ports ABOVE the main checkout's (frontend :$fePort$(if ($hasBackend) { ", backend :$bePort" })), never the main ones, and MUST be stopped before the PR.
+
+$caseA
+``````
+# read the AUTO_PORT / URL it prints — that is the URL you open in the browser
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action start -AutoPort -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+# tear down when done (pass the SAME port it printed):
+pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/server/dev-server.ps1" -Action stop -Port <fe port> -Dir "<this worktree>" -Config "<repo>/.claude/session-plugin.json"
+``````
+$caseB
 $browserVerify
 **Hard rules for throwaway servers (this is how the machine stays alive):**
-- **Always STOP every server you start, before the PR.** Orphaned ``next``/``uvicorn`` processes pile up and will fry the box. Never leave one running "to be safe".
-- **Leave a way back in.** Teardown is non-negotiable, but a human still has to review this. In the PR body, paste the EXACT start commands (with this worktree's path) so a reviewer can bring the same surface up in one step. Verified-then-torn-down with no relaunch instructions is not reviewable.
-- **One of each, max.** Don't start a second frontend/backend "because the first didn't respond" — check ``-Action status`` first, read the log it points to, then reuse or stop+restart the SAME one.
-- **Never use ``--reload`` or ``python main.py``.** ``--reload`` spawns a child that re-imports the app (crashes on Windows) and respawns endlessly; ``python main.py`` hard-binds :8000. The backend-server script already runs the safe single-process form — use it, don't hand-roll uvicorn.
-- **Never persist a port or URL.** They are runtime flags ONLY. Do NOT write them into ``.env``, ``package.json``, ``next.config.*``, ``vercel.json``, or any committed file, and do NOT change the configured 3000/8000. A changed port/URL in a PR breaks everyone.
+- **Always STOP every server you start, before the PR.** Orphaned dev servers pile up and will fry the box. Never leave one running "to be safe".
+- **Leave a way back in.** In the PR body, paste the EXACT start commands (with this worktree's path) so a reviewer can bring the same surface up in one step.
+- **One of each, max.** Don't start a second server "because the first didn't respond" — check ``-Action status`` first, read the log it points to, then reuse or stop+restart the SAME one.
+- **Never persist a port or URL.** They are runtime flags ONLY. Do NOT write them into ``.env``, ``package.json``, ``next.config.*``, ``vercel.json``, or any committed file, and do NOT change the configured ports. A changed port/URL in a PR breaks everyone.
 - Without ``-AutoPort`` the scripts bind the CONFIGURED port — use that ONLY in the main checkout, never in a worktree.
 - If ONE specific port is stuck, free ONLY that single PID — never a sweep:
 ``````
 pwsh -NoProfile -File "`${CLAUDE_PLUGIN_ROOT}/scripts/util/kill-port.ps1" -Port <port>
 ``````
-- Touch ONLY your own worktree's server. NEVER "kill all servers" or kill by process name — if a port you need is held by another worktree, report it to the orchestrator; do not kill across worktrees.
+- Touch ONLY your own worktree's server. If a port you need is held by another worktree, report it; do not kill across worktrees.
 
 ## 5. Test before commit — run SCOPED unit tests (the full suite runs in CI)
 $tests
@@ -591,12 +713,11 @@ gh pr create --repo $repo --base $base --head $Branch --title "<type>($Name): <d
 $docsSection
 
 ### Closing keywords: one ``Closes #N`` per issue, on its own line
-If this PR resolves MORE than one issue (a module bundle), the body needs a **separate ``Closes #N`` line for each one**, at the end, each starting with the keyword:
+If this PR resolves MORE than one issue, the body needs a **separate ``Closes #N`` line for each one**, at the end, each starting with the keyword:
 
 ``````
 Closes #404
 Closes #601
-Closes #618
 ``````
 
 GitHub only auto-closes on the literal ``Closes #N`` / ``Fixes #N`` / ``Resolves #N`` form. It does NOT parse a prose or list mention, so none of these close anything:
@@ -604,7 +725,7 @@ GitHub only auto-closes on the literal ``Closes #N`` / ``Fixes #N`` / ``Resolves
 - ``Closes #404, #601`` (only the FIRST number is parsed)
 - ``Refs #404``, ``Part of #404``, ``Fixed in this PR: #404``
 
-Use ``Refs #N`` deliberately for an issue this PR touches but does NOT finish (epics, trackers, partial passes) — and say in the body what is left. Getting this wrong is silent: the PR merges, the work ships, and the issue sits open forever with nobody able to tell it is done.
+Use ``Refs #N`` deliberately for an issue this PR touches but does NOT finish (trackers, partial passes) — and say in the body what is left.
 
 ## 7. Signal completion
 When the PR is open and tests pass, output EXACTLY:
@@ -612,12 +733,12 @@ When the PR is open and tests pass, output EXACTLY:
 ``````
 WORKTREE_STATUS: COMPLETE
 PR: <url>
-LANES: <which lanes you actually ran, e.g. frontend, backend, routing, testing, review>
-REQUIRED_SKIPPED: <none | each REQUIRED agent/skill you did NOT run + why>
+LANES: <which lanes you actually ran, e.g. frontend, backend, routing, testing, review>$skillsRunLine
+REQUIRED_SKIPPED: <none | each REQUIRED skill, agent or step you did NOT run + why>
 TESTS_PASSED: <yes/no + one-line details>
 OBSERVED: <what you SAW when you ran it — the concrete value/behaviour, or "n/a: not user-visible">
 ``````
-
+$waiting
 If you hit a blocker you cannot resolve, output:
 
 ``````

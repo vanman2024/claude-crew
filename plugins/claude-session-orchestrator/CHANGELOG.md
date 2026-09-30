@@ -5,6 +5,30 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed: workers run their skill; the brief stops competing with it
+- **A skill can drive a worker.** An issue's `Skill:` line (e.g. `Skill: dev-lifecycle:page-web`),
+  or a `workerSkills` rule in the config (`{ "titleMatch": "^Page:", "skill": "dev-lifecycle:page-web" }`),
+  makes the brief open with `## 0. Your skill` as the worker's first action. The worker
+  follows the skill step by step. The brief then leaves out its own work-type, data-flow, plan
+  and lane-roster steps, so the worker gets one process, not three. On mechanicjobs.ca, 0 of
+  11 page workers invoked `page-web`: the brief never named it, and the issue recipe, the
+  generic steps and the lane roster all competed.
+- **Gates:** a skill-driven worker parks at the skill's person gates (review board, section
+  canvas) with `WORKTREE_STATUS: WAITING` plus `GATE`/`LINK`/`ASK`. The orchestrator shows it
+  to the user and relays the pick. The completion signal gains `SKILLS_RUN:`.
+- **New `status/check-worker-skills.ps1`:** reads each worker's Claude transcripts and reports
+  whether it invoked its brief's skill, plus every skill and agent it called. `/crew:orchestrate
+  poll` runs it and stops a worker that is building without its skill. The browser review
+  treats a missing skill as a finding.
+- **`plan` writes `Skill:`** on page issues: `page-web` for public pages, `page-app` for
+  signed-in screens. psmux-dispatch takes `-Skill`.
+- **Dated brief content fixed:**
+  - Main ports come from the config (`devServer.port`, the backend's `basePort`), not a
+    hardcoded 3000/8000.
+  - The backend server case is shown only when the project has a backend.
+  - The API-verification rule no longer lists one project's services.
+  - The intro and the server rules no longer mention orchestrator or reviewer windows.
+
 ### Changed: the orchestrator is your session, and it reviews in a real browser
 - **No more orchestrator or reviewer windows.** The workers are the only psmux windows.
   The user's own session conducts *and* orchestrates. `start-orchestrator.ps1`,

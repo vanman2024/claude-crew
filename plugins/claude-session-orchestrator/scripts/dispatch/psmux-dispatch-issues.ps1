@@ -93,7 +93,12 @@ $($issue.body)
     $briefArgs = @{ Config = $cfg; Name = $name; Branch = $branch; Task = $task; IssueNumber = $n; Title = $issue.title }
     if ($hints.Spec) { $briefArgs.Spec = $hints.Spec }
     if ($hints.Mode) { $briefArgs.Mode = $hints.Mode }
-    if ($hints.Spec -or $hints.Mode) { Write-Host "  From issue: spec=$($hints.Spec) mode=$($hints.Mode)" }
+    # The skill that drives the worker: the issue's `Skill:` line, else a config.workerSkills
+    # rule (e.g. titleMatch "^Page:" -> dev-lifecycle:page-web). Without one the brief
+    # carries the generic process.
+    $skill = Resolve-WorkerSkill -Config $cfg -Title $issue.title -Labels @($issue.labels | ForEach-Object { $_.name }) -IssueSkill $hints.Skill
+    if ($skill) { $briefArgs.Skill = $skill }
+    if ($hints.Spec -or $hints.Mode -or $skill) { Write-Host "  From issue: spec=$($hints.Spec) mode=$($hints.Mode) skill=$skill" }
     $brief = New-WorkerBrief @briefArgs
     $briefFile = Join-Path $briefDir "brief-$n.md"
     Set-Content -Path $briefFile -Value $brief -Encoding UTF8

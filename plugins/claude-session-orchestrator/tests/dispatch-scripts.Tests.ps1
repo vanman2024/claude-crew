@@ -653,3 +653,74 @@ Describe "Orchestrate: monitor, browser review with playwright-cli, dev-lifecycl
         $script:ORef | Should -Match "On the user's word only"
     }
 }
+
+Describe "check-worker-skills.ps1: did the worker invoke its brief's skill? (from the transcript)" {
+    BeforeAll {
+        $script:Tmp = Join-Path ([IO.Path]::GetTempPath()) ("cws-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+        $repo = Join-Path $script:Tmp "app"; $wts = Join-Path $script:Tmp "app-worktrees"; $home2 = Join-Path $script:Tmp "home"
+        New-Item -ItemType Directory -Force $repo, $wts | Out-Null
+        git -C $repo init -q 2>$null
+        git -C $repo -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>$null
+        foreach ($w in 'ran', 'skipped') {
+            $wtPath = Join-Path $wts $w
+            git -C $repo worktree add -q $wtPath -b "fix/$w" 2>$null
+            Set-Content (Join-Path $wtPath ".claude-bootstrap.md") "# Worktree brief: $w`n`n## 0. Your skill: ``/dev-lifecycle:page-web`` (your FIRST action)"
+            $slug = ([IO.Path]::GetFullPath($wtPath).TrimEnd('\') -replace '[^A-Za-z0-9]', '-')
+            $tdir = Join-Path $home2 ".claude\projects\$slug"
+            New-Item -ItemType Directory -Force $tdir | Out-Null
+            $skill = if ($w -eq 'ran') { 'dev-lifecycle:page-web' } else { 'frontend-design:frontend-design' }
+            $lines = @(
+                (@{ type = 'assistant'; message = @{ content = @(@{ type = 'tool_use'; name = 'Skill'; input = @{ skill = $skill } }) } } | ConvertTo-Json -Depth 6 -Compress),
+                (@{ type = 'assistant'; message = @{ content = @(@{ type = 'tool_use'; name = 'Agent'; input = @{ subagent_type = 'nextjs-frontend:design-enforcer-agent' } }) } } | ConvertTo-Json -Depth 6 -Compress),
+                '{"type":"summary","summary":"no message here, tool_use"}'
+            )
+            Set-Content (Join-Path $tdir "a.jsonl") $lines
+        }
+        $cfgPath = Join-Path $script:Tmp "session-plugin.json"
+        @{ projectName = 'app'; repoPath = $repo; worktreesPath = $wts; psmuxSession = 'app'; githubRepo = 'o/app'; workerCmdPath = 'claude'; layout = @{ type = 'root' } } |
+            ConvertTo-Json | Set-Content $cfgPath
+        $script:Script = Join-Path $script:ScriptsDir "status\check-worker-skills.ps1"
+        $out = & pwsh -NoProfile -File $script:Script -Config $cfgPath -ProjectsDir (Join-Path $home2 ".claude\projects") -Json
+        $script:Rows = ($out -join "`n") | ConvertFrom-Json
+    }
+    AfterAll {
+        git -C (Join-Path $script:Tmp "app") worktree prune 2>$null
+        Remove-Item -Recurse -Force $script:Tmp -ErrorAction SilentlyContinue
+    }
+
+    It "reads the required skill from the worker's brief" {
+        ($script:Rows | Where-Object Name -eq 'ran').Required | Should -Contain 'dev-lifecycle:page-web'
+    }
+    It "a worker that invoked it is not missing it; one that did not is" {
+        @(($script:Rows | Where-Object Name -eq 'ran').Missing).Count | Should -Be 0
+        ($script:Rows | Where-Object Name -eq 'skipped').Missing | Should -Contain 'dev-lifecycle:page-web'
+    }
+    It "lists the skills and agents the worker actually called" {
+        ($script:Rows | Where-Object Name -eq 'skipped').Skills | Should -Contain 'frontend-design:frontend-design x1'
+        ($script:Rows | Where-Object Name -eq 'ran').Agents | Should -Contain 'nextjs-frontend:design-enforcer-agent x1'
+    }
+}
+
+Describe "Orchestrate checks each worker ran its skill, and relays gates" {
+    BeforeAll {
+        $o = Join-Path $PSScriptRoot "..\skills\orchestrate\reference"
+        $script:ORef2    = Get-Content (Join-Path $o "commands-orchestrate.md") -Raw
+        $script:OReview2 = Get-Content (Join-Path $o "browser-review.md") -Raw
+        $script:Plan2    = Get-Content (Join-Path $PSScriptRoot "..\skills\session\reference\commands-plan.md") -Raw
+    }
+    It "poll runs check-worker-skills and stops a worker building without its skill" {
+        $script:ORef2 | Should -Match 'check-worker-skills\.ps1'
+        $script:ORef2 | Should -Match 'MISSING'
+    }
+    It "poll relays a WAITING gate to the user and never picks for them" {
+        $script:ORef2 | Should -Match 'WORKTREE_STATUS: WAITING'
+        $script:ORef2 | Should -Match 'Never pick for them'
+    }
+    It "the browser review treats a missing skill as a finding" {
+        $script:OReview2 | Should -Match 'check-worker-skills\.ps1'
+    }
+    It "plan writes Skill: page-web for public pages, page-app for signed-in screens" {
+        $script:Plan2 | Should -Match 'Skill: dev-lifecycle:page-web'
+        $script:Plan2 | Should -Match 'dev-lifecycle:page-app'
+    }
+}

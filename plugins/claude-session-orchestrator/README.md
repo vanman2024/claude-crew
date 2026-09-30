@@ -322,13 +322,28 @@ After dispatching, run `/crew:orchestrate start` in the same session. It:
 The project's `browserVerify` config can override the browser steps; the default is
 `playwright-cli`, not Claude in Chrome.
 
+### Skill-driven workers (`workerSkills`, `Skill:`)
+
+Some work has a skill that owns the whole build. Pages are the main case:
+`dev-lifecycle:page-web` for public pages and `dev-lifecycle:page-app` for signed-in screens.
+Name the skill on the issue (`Skill: dev-lifecycle:page-web`) or route it in the config:
+
+```json
+"workerSkills": [{ "titleMatch": "^Page:", "skill": "dev-lifecycle:page-web" }]
+```
+
+The worker's brief then opens with that skill as its first action, and leaves out the generic
+plan and lane steps. At the skill's person gates, the worker parks with
+`WORKTREE_STATUS: WAITING` and a link. Each poll, `check-worker-skills.ps1` reads the worker
+transcripts and flags any worker building without its skill.
+
 ---
 
 ## Hard contracts (non-negotiable, baked in)
 
 1. **No auto-merge.** The orchestrator never runs `gh pr merge`. You authorize merges ("merge it").
-2. **Orchestrator doesn't touch the main checkout.** No `git checkout`, no `git pull` there. It lives in its own worktree.
-3. **Batch scoping.** It only tracks PRs whose head branch matches an *active* worktree under `worktreesPath/` (excluding its own). Other branches/sessions are out of scope.
+2. **Orchestrating doesn't move the main checkout's branch.** Branch review runs from each worker's worktree (`-AutoPort`); `<base>` is pulled into the main checkout only on `integrate`, on your word.
+3. **Batch scoping.** It only tracks PRs whose head branch matches an *active* worktree under `worktreesPath/`. Other branches/sessions are out of scope.
 4. **Junction-first teardown.** On Windows, `git worktree remove` follows the `node_modules` junction into the main repo and deletes real files. `close-worker.ps1` `rmdir`s the junction(s) **first**.
 5. **Self-terminate** when no live workers AND no open batch PRs remain.
 6. **`/loop` is the cron.** No Windows scheduled tasks, no PowerShell sleep loops.
