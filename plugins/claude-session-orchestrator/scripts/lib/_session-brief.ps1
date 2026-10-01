@@ -465,6 +465,9 @@ function Get-IssueBriefHints {
 #     { "titleMatch": "^Page:", "skill": "dev-lifecycle:page-web" },
 #     { "label": "app-screen",  "skill": "dev-lifecycle:page-app" }
 #   ]
+# With no workerSkills in the config, dev-lifecycle's own title convention applies:
+# `Page: <route>` is a public page (page-web), `Screen: <route>` a signed-in app screen
+# (page-app). Those are the titles /dev-lifecycle:page-web and page-app write.
 # Returns $null when nothing matches: the brief then carries the generic process.
 function Resolve-WorkerSkill {
     param(
@@ -474,8 +477,11 @@ function Resolve-WorkerSkill {
         [string]$IssueSkill
     )
     if ($IssueSkill) { return ($IssueSkill -replace '^/', '') }
-    if (-not $Config.PSObject.Properties['workerSkills'] -or -not $Config.workerSkills) { return $null }
-    foreach ($rule in @($Config.workerSkills)) {
+    $rules = if ($Config.PSObject.Properties['workerSkills'] -and $Config.workerSkills) { @($Config.workerSkills) } else {
+        @([pscustomobject]@{ titleMatch = '^\s*Page:';   skill = 'dev-lifecycle:page-web' },
+          [pscustomobject]@{ titleMatch = '^\s*Screen:'; skill = 'dev-lifecycle:page-app' })
+    }
+    foreach ($rule in $rules) {
         if (-not $rule.PSObject.Properties['skill'] -or -not $rule.skill) { continue }
         $hit = $false
         if ($rule.PSObject.Properties['titleMatch'] -and $rule.titleMatch -and $Title) {
@@ -500,7 +506,7 @@ function Format-SkillSection {
         [string]$Title,
         [int]$IssueNumber
     )
-    $arg = if ($Title) { $Title -replace '^\s*Page:\s*', '' } else { '<this task>' }
+    $arg = if ($Title) { $Title -replace '^\s*(Page|Screen):\s*', '' } else { '<this task>' }
     $issueRef = if ($IssueNumber) { "#$IssueNumber" } else { 'this task' }
     return @"
 ## 0. Your skill: ``/$Skill`` (your FIRST action)

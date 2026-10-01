@@ -158,10 +158,11 @@ ls docs specs 2>/dev/null; ls *.md
   a project that has none; inventing `docs/architecture/` in a repo that never had one
   just makes work for a human to delete later.
 
-**`workerSkills`** — which skill drives a worker, by issue title (regex) or label. Ask
-whether the project builds pages with dev-lifecycle. If it does, route them to the page skill,
-so every page worker starts `/dev-lifecycle:page-web` (public) or `/dev-lifecycle:page-app`
-(signed-in):
+**`workerSkills`** — which skill drives a worker, by issue title (regex) or label. Usually
+leave it out: with no block, dev-lifecycle's own titles already route, `Page: <route>` to
+`/dev-lifecycle:page-web` (public) and `Screen: <route>` to `/dev-lifecycle:page-app`
+(signed-in). Write it only when the project titles or labels its pages differently; it then
+REPLACES those defaults, so list both:
 
 ```json
 "workerSkills": [

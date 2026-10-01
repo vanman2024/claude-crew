@@ -326,10 +326,15 @@ The project's `browserVerify` config can override the browser steps; the default
 
 Some work has a skill that owns the whole build. Pages are the main case:
 `dev-lifecycle:page-web` for public pages and `dev-lifecycle:page-app` for signed-in screens.
-Name the skill on the issue (`Skill: dev-lifecycle:page-web`) or route it in the config:
+This needs no config when the issues use dev-lifecycle's titles: `Page: <route>` runs
+`page-web`, and `Screen: <route>` runs `page-app`. An issue's `Skill:` line overrides that. A
+project with other titles or labels sets `workerSkills`, which replaces the defaults:
 
 ```json
-"workerSkills": [{ "titleMatch": "^Page:", "skill": "dev-lifecycle:page-web" }]
+"workerSkills": [
+  { "titleMatch": "^Page:",   "skill": "dev-lifecycle:page-web" },
+  { "label": "app-screen",    "skill": "dev-lifecycle:page-app" }
+]
 ```
 
 The worker's brief then opens with that skill as its first action, and leaves out the generic
