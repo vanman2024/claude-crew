@@ -392,7 +392,15 @@ Describe "Resolve-WorkerSkill: issue line wins, then config.workerSkills" {
     }
     It "nothing matches -> null (generic brief)" {
         Resolve-WorkerSkill -Config $script:Cfg -Title 'Fix login bug' | Should -BeNullOrEmpty
-        Resolve-WorkerSkill -Config ([pscustomobject]@{}) -Title 'Page: /x' | Should -BeNullOrEmpty
+        Resolve-WorkerSkill -Config ([pscustomobject]@{}) -Title 'Fix login bug' | Should -BeNullOrEmpty
+    }
+    It "with no workerSkills, dev-lifecycle's titles route: Page: -> page-web, Screen: -> page-app" {
+        Resolve-WorkerSkill -Config ([pscustomobject]@{}) -Title 'Page: /jobs' | Should -Be 'dev-lifecycle:page-web'
+        Resolve-WorkerSkill -Config ([pscustomobject]@{}) -Title 'Screen: /dashboard/jobs' | Should -Be 'dev-lifecycle:page-app'
+    }
+    It "a Screen: brief passes the route to page-app" {
+        $b = New-WorkerBrief -Config (Get-MonorepoConfig) -Name "s" -Branch "fix/s" -Task "t" -Title "Screen: /dashboard" -Skill "dev-lifecycle:page-app"
+        $b | Should -Match 'args: `/dashboard`'
     }
     It "Get-IssueBriefHints reads a Skill: line, plain, bolded or slashed" {
         (Get-IssueBriefHints -Body "Spec: specs/a.md`nSkill: dev-lifecycle:page-web").Skill | Should -Be 'dev-lifecycle:page-web'

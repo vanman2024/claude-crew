@@ -122,6 +122,8 @@ Part of #<epic>
   skill as its first action and drops the generic plan/lane steps; the orchestrator checks the
   transcript for the call. Leave the line out for ordinary code work. A project can instead set
   a default in `workerSkills` (see session-init); an issue's own `Skill:` line wins over it.
+  With no `workerSkills`, dev-lifecycle's titles route on their own: `Page: <route>` gets
+  `page-web` and `Screen: <route>` gets `page-app`, so title page issues that way.
 - Five pieces or more: create a **tracker** first (`[Tracker] <spec title>`, listing the waves),
   make each piece a real **sub-issue** of it, and give it its own board tab filtered to it
   (see [commands-board.md](commands-board.md), "Trackers"). Smaller plans skip the tracker.

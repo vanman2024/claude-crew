@@ -7,7 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed: workers run their skill; the brief stops competing with it
 - **A skill can drive a worker.** An issue's `Skill:` line (e.g. `Skill: dev-lifecycle:page-web`),
-  or a `workerSkills` rule in the config (`{ "titleMatch": "^Page:", "skill": "dev-lifecycle:page-web" }`),
+  or by default dev-lifecycle's titles (`Page: <route>` → `page-web`, `Screen: <route>` →
+  `page-app`; a `workerSkills` config rule replaces those defaults),
   makes the brief open with `## 0. Your skill` as the worker's first action. The worker
   follows the skill step by step. The brief then leaves out its own work-type, data-flow, plan
   and lane-roster steps, so the worker gets one process, not three. On mechanicjobs.ca, 0 of
