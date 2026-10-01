@@ -63,6 +63,11 @@ its testing-token flow), save it once with `playwright-cli -s=<name> state-save 
 
 ## 5. The skills the work is owed
 
+First, did the worker run its own skill? `check-worker-skills.ps1 -Name <worker>`: a
+`MISSING` skill, or a step the skill names with no call behind it, is a finding like any other.
+Approving a page built without `page-web` / `page-app` is how the mechanicjobs pages shipped
+flat.
+
 - **`dev-lifecycle:verify`**: verify the change against its issue and spec.
 - **A page** → the checks in `dev-lifecycle:page-web` (public page) or `dev-lifecycle:page-app`
   (signed-in screen): design enforcement against DESIGN.md, web design guidelines, motion review

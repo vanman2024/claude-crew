@@ -38,6 +38,10 @@ param(
     [ValidateSet('feature', 'iteration')][string]$Mode,
     [string]$Spec,
 
+    # The skill that drives this worker (e.g. dev-lifecycle:page-web). When set, the brief
+    # hands the process to that skill instead of the generic plan/lanes steps.
+    [string]$Skill,
+
     # Config resolution (see _session-config.ps1)
     [string]$Config,
     [string]$RepoPath,
@@ -116,6 +120,8 @@ if ($Continue) {
     if ($Title) { $briefArgs.Title = $Title }
     if ($PSBoundParameters.ContainsKey('IssueNumber') -and $IssueNumber) { $briefArgs.IssueNumber = $IssueNumber }
     if ($Mode) { $briefArgs.Mode = $Mode }
+    $resolvedSkill = Resolve-WorkerSkill -Config $cfg -Title $Title -IssueSkill $Skill
+    if ($resolvedSkill) { $briefArgs.Skill = $resolvedSkill; Step "Skill: $resolvedSkill" }
     if ($Spec) {
         $briefArgs.Spec = $Spec
         if (-not (Test-Path (Join-Path $RepoRoot $Spec))) { Step "WARN: spec '$Spec' not found under $RepoRoot (worker is still told to read it)" }

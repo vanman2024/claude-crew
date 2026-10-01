@@ -158,13 +158,27 @@ ls docs specs 2>/dev/null; ls *.md
   a project that has none; inventing `docs/architecture/` in a repo that never had one
   just makes work for a human to delete later.
 
+**`workerSkills`** — which skill drives a worker, by issue title (regex) or label. Ask
+whether the project builds pages with dev-lifecycle. If it does, route them to the page skill,
+so every page worker starts `/dev-lifecycle:page-web` (public) or `/dev-lifecycle:page-app`
+(signed-in):
+
+```json
+"workerSkills": [
+  { "titleMatch": "^Page:", "skill": "dev-lifecycle:page-web" },
+  { "label": "app-screen", "skill": "dev-lifecycle:page-app" }
+]
+```
+
+An issue's own `Skill:` line wins over these rules. Omit the block when no skill owns a whole build.
+
 ## Step 5 — Write the config
 
 Write `<repoPath>\.claude\session-plugin.json` (create `.claude` if needed) with
 exactly the schema shown in the examples. Required top-level keys:
 `projectName, repoPath, worktreesPath, psmuxSession, githubRepo,
 workerCmdPath, layout`. Also write `"defaultBranch": "auto"` (optional; absent means the same).
-Optional: `devServer`, `teams`, `dataFlow`, `docs`, `browserVerify`, `review`,
+Optional: `devServer`, `teams`, `dataFlow`, `docs`, `browserVerify`, `workerSkills`, `review`,
 `workerCli`, `worktreeDeps`.
 
 > `worktreeDeps` (optional) controls how each worker worktree gets its `node_modules`:

@@ -313,3 +313,90 @@ Describe "Format-TeamsSection is CLI-aware (Codex must not block on Claude agent
         $brief | Should -Match 'owns'
     }
 }
+
+Describe "Skill-driven workers: the skill IS the process (mechanicjobs: 0 of 11 ran page-web)" {
+    BeforeAll {
+        $script:SkillBrief = New-WorkerBrief -Config (Get-MonorepoConfig) -Name "fix-25-page-jobs" -Branch "fix/25-page-jobs" `
+            -Task "Build the job page." -IssueNumber 25 -Title "Page: /jobs/{slug}" -Skill "/dev-lifecycle:page-web"
+    }
+
+    It "opens with the skill as the worker's FIRST action, invoked via the Skill tool with the route" {
+        $script:SkillBrief | Should -Match '## 0\. Your skill: `/dev-lifecycle:page-web`'
+        $script:SkillBrief | Should -Match 'skill: "dev-lifecycle:page-web"'
+        $script:SkillBrief | Should -Match 'args: `/jobs/\{slug\}`'
+        $script:SkillBrief | Should -Match 'reads your transcript'
+    }
+
+    It "does not hand the worker a second process: no work type, data-flow, plan or lane roster" {
+        $script:SkillBrief | Should -Not -Match '## 0\. Work type'
+        $script:SkillBrief | Should -Not -Match 'Map the data flow'
+        $script:SkillBrief | Should -Not -Match '## 4\. Plan first'
+        $script:SkillBrief | Should -Not -Match '### Lane: '
+    }
+
+    It "parks at the skill's person gates instead of picking, and reports the skills it ran" {
+        $script:SkillBrief | Should -Match 'WORKTREE_STATUS: WAITING'
+        $script:SkillBrief | Should -Match 'GATE:'
+        $script:SkillBrief | Should -Match 'Do not pick for the person'
+        $script:SkillBrief | Should -Match 'SKILLS_RUN:'
+    }
+
+    It "keeps the crew rules a skill does not know: kill rules, throwaway servers, PR, Closes" {
+        $script:SkillBrief | Should -Match 'NEVER kill a process by name'
+        $script:SkillBrief | Should -Match '-AutoPort'
+        $script:SkillBrief | Should -Match 'Closes #25'
+        $script:SkillBrief | Should -Match 'WORKTREE_STATUS: COMPLETE'
+    }
+
+    It "a brief with no skill keeps the generic process and no WAITING gate" {
+        $b = New-WorkerBrief -Config (Get-MonorepoConfig) -Name "x" -Branch "fix/x" -Task "t" -IssueNumber 3
+        $b | Should -Match '## 0\. Work type'
+        $b | Should -Match '## 3\. Map the data flow'
+        $b | Should -Not -Match 'WORKTREE_STATUS: WAITING'
+        $b | Should -Not -Match 'SKILLS_RUN:'
+    }
+}
+
+Describe "Dated brief content is gone" {
+    It "takes the main ports from the config, not a hardcoded 3000" {
+        $cfg = Get-MonorepoConfig
+        $cfg | Add-Member -NotePropertyName devServer -NotePropertyValue ([pscustomobject]@{ port = 3301 }) -Force
+        $b = New-WorkerBrief -Config $cfg -Name "x" -Branch "fix/x" -Task "t"
+        $b | Should -Match 'frontend :3301'
+        $b | Should -Not -Match '3001\+'
+    }
+
+    It "names no single project's services and no orchestrator/reviewer windows" {
+        $b = New-WorkerBrief -Config (Get-MonorepoConfig) -Name "x" -Branch "fix/x" -Task "t"
+        $b | Should -Not -Match 'Mastra|Multilead|Unipile'
+        $b | Should -Not -Match 'the orchestrator, the reviewer'
+        $b | Should -Not -Match 'watching this psmux pane'
+    }
+}
+
+Describe "Resolve-WorkerSkill: issue line wins, then config.workerSkills" {
+    BeforeAll {
+        $script:Cfg = [pscustomobject]@{ workerSkills = @(
+            [pscustomobject]@{ titleMatch = '^Page:'; skill = 'dev-lifecycle:page-web' },
+            [pscustomobject]@{ label = 'app-screen'; skill = '/dev-lifecycle:page-app' }
+        ) }
+    }
+    It "the issue's Skill: line wins over a matching rule" {
+        Resolve-WorkerSkill -Config $script:Cfg -Title 'Page: /x' -IssueSkill 'dev-lifecycle:page-app' | Should -Be 'dev-lifecycle:page-app'
+    }
+    It "a title rule matches" {
+        Resolve-WorkerSkill -Config $script:Cfg -Title 'Page: /jobs' | Should -Be 'dev-lifecycle:page-web'
+    }
+    It "a label rule matches, and a leading slash is dropped" {
+        Resolve-WorkerSkill -Config $script:Cfg -Title 'Dashboard' -Labels @('app-screen') | Should -Be 'dev-lifecycle:page-app'
+    }
+    It "nothing matches -> null (generic brief)" {
+        Resolve-WorkerSkill -Config $script:Cfg -Title 'Fix login bug' | Should -BeNullOrEmpty
+        Resolve-WorkerSkill -Config ([pscustomobject]@{}) -Title 'Page: /x' | Should -BeNullOrEmpty
+    }
+    It "Get-IssueBriefHints reads a Skill: line, plain, bolded or slashed" {
+        (Get-IssueBriefHints -Body "Spec: specs/a.md`nSkill: dev-lifecycle:page-web").Skill | Should -Be 'dev-lifecycle:page-web'
+        (Get-IssueBriefHints -Body "**Skill:** ``/dev-lifecycle:page-app``").Skill | Should -Be 'dev-lifecycle:page-app'
+        (Get-IssueBriefHints -Body "No hints here").Skill | Should -BeNullOrEmpty
+    }
+}
